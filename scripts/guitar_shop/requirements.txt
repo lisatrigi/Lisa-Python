@@ -1,0 +1,26 @@
+# StringMaster Guitar Shop - Requirements
+
+# Web Framework & API (FastAPI - main backend & routing system)
+fastapi>=0.109.0
+uvicorn>=0.27.0
+pydantic>=2.5.3
+
+# Web Scraping (requests & BeautifulSoup)
+requests>=2.31.0
+beautifulsoup4>=4.12.3
+
+# Database (SQLite3 - built-in, SQLAlchemy for ORM patterns)
+# sqlite3 is built-in to Python
+
+# Frontend (Streamlit - UI only)
+streamlit>=1.31.0
+
+# Data Visualization (Matplotlib & Pandas)
+matplotlib>=3.8.2
+pandas>=2.2.0
+
+# Authentication utilities
+python-multipart>=0.0.6
+
+# HTTP client for API communication
+httpx>=0.26.0
