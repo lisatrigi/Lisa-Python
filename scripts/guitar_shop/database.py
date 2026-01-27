@@ -59,6 +59,7 @@ class DatabaseManager:
                     description TEXT,
                     image_url TEXT,
                     category_id INTEGER,
+                    discount_percent REAL DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (category_id) REFERENCES categories (id)
                 )
@@ -72,6 +73,8 @@ class DatabaseManager:
                     email TEXT UNIQUE NOT NULL,
                     password_hash TEXT NOT NULL,
                     role TEXT DEFAULT 'customer',
+                    is_online INTEGER DEFAULT 0,
+                    last_login TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -98,6 +101,21 @@ class DatabaseManager:
                     price_at_purchase REAL NOT NULL,
                     FOREIGN KEY (order_id) REFERENCES orders (id),
                     FOREIGN KEY (guitar_id) REFERENCES guitars (id)
+                )
+            """)
+            
+            # Purchase notifications table (for admin)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS purchase_notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    order_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    username TEXT NOT NULL,
+                    total REAL NOT NULL,
+                    is_read INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (order_id) REFERENCES orders (id),
+                    FOREIGN KEY (user_id) REFERENCES users (id)
                 )
             """)
             
@@ -199,8 +217,8 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO guitars (name, brand, guitar_type, price, stock, description, image_url, category_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO guitars (name, brand, guitar_type, price, stock, description, image_url, category_id, discount_percent)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 guitar.name, 
                 guitar.brand, 
@@ -209,7 +227,8 @@ class DatabaseManager:
                 guitar.stock, 
                 guitar.description, 
                 guitar.image_url,
-                category_id
+                category_id,
+                getattr(guitar, 'discount_percent', 0)
             ))
             return cursor.lastrowid
     
@@ -272,7 +291,7 @@ class DatabaseManager:
         if not kwargs:
             return False
         
-        valid_fields = {'name', 'brand', 'guitar_type', 'price', 'stock', 'description', 'image_url', 'category_id'}
+        valid_fields = {'name', 'brand', 'guitar_type', 'price', 'stock', 'description', 'image_url', 'category_id', 'discount_percent'}
         updates = {k: v for k, v in kwargs.items() if k in valid_fields}
         
         if not updates:
@@ -323,6 +342,50 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM guitars")
             return cursor.fetchone()[0]
+    
+    def apply_discount_to_guitar(self, guitar_id: int, discount_percent: float) -> bool:
+        """Apply discount to a specific guitar"""
+        if not 0 <= discount_percent <= 100:
+            raise ValueError("Discount must be between 0 and 100")
+        return self.update_guitar(guitar_id, discount_percent=discount_percent)
+    
+    def apply_discount_to_brand(self, brand: str, discount_percent: float) -> int:
+        """Apply discount to all guitars of a brand, returns count of updated guitars"""
+        if not 0 <= discount_percent <= 100:
+            raise ValueError("Discount must be between 0 and 100")
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE guitars SET discount_percent = ? WHERE LOWER(brand) = LOWER(?)
+            """, (discount_percent, brand))
+            return cursor.rowcount
+    
+    def apply_discount_to_type(self, guitar_type: str, discount_percent: float) -> int:
+        """Apply discount to all guitars of a type, returns count of updated guitars"""
+        if not 0 <= discount_percent <= 100:
+            raise ValueError("Discount must be between 0 and 100")
+        
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE guitars SET discount_percent = ? WHERE LOWER(guitar_type) = LOWER(?)
+            """, (discount_percent, guitar_type))
+            return cursor.rowcount
+    
+    def clear_all_discounts(self) -> int:
+        """Clear all discounts, returns count of updated guitars"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE guitars SET discount_percent = 0 WHERE discount_percent > 0")
+            return cursor.rowcount
+    
+    def get_discounted_guitars(self) -> List[Guitar]:
+        """Get all guitars with active discounts"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM guitars WHERE discount_percent > 0 ORDER BY discount_percent DESC")
+            return [self._row_to_guitar(row) for row in cursor.fetchall()]
     
     # ==================== USER CRUD ====================
     
@@ -380,12 +443,33 @@ class DatabaseManager:
             cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
             return [self._row_to_user(row) for row in cursor.fetchall()]
     
+    def get_online_users(self) -> List[User]:
+        """Get all currently online users (non-admin)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE is_online = 1 AND role != 'admin' ORDER BY last_login DESC")
+            return [self._row_to_user(row) for row in cursor.fetchall()]
+    
+    def set_user_online(self, user_id: int, is_online: bool) -> bool:
+        """Set user online status"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if is_online:
+                cursor.execute("""
+                    UPDATE users SET is_online = 1, last_login = CURRENT_TIMESTAMP WHERE id = ?
+                """, (user_id,))
+            else:
+                cursor.execute("""
+                    UPDATE users SET is_online = 0 WHERE id = ?
+                """, (user_id,))
+            return cursor.rowcount > 0
+    
     def update_user(self, user_id: int, **kwargs) -> bool:
         """Update user fields"""
         if not kwargs:
             return False
         
-        valid_fields = {'email', 'password_hash', 'role'}
+        valid_fields = {'email', 'password_hash', 'role', 'is_online', 'last_login'}
         updates = {k: v for k, v in kwargs.items() if k in valid_fields}
         
         if not updates:
@@ -405,6 +489,58 @@ class DatabaseManager:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
             return cursor.rowcount > 0
+    
+    # ==================== NOTIFICATION OPERATIONS ====================
+    
+    def create_purchase_notification(self, order_id: int, user_id: int, username: str, total: float) -> int:
+        """Create a purchase notification for admin"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO purchase_notifications (order_id, user_id, username, total)
+                VALUES (?, ?, ?, ?)
+            """, (order_id, user_id, username, total))
+            return cursor.lastrowid
+    
+    def get_unread_notifications(self) -> List[dict]:
+        """Get all unread purchase notifications"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT pn.*, o.status as order_status
+                FROM purchase_notifications pn
+                JOIN orders o ON pn.order_id = o.id
+                WHERE pn.is_read = 0
+                ORDER BY pn.created_at DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_all_notifications(self, limit: int = 50) -> List[dict]:
+        """Get all purchase notifications"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT pn.*, o.status as order_status
+                FROM purchase_notifications pn
+                JOIN orders o ON pn.order_id = o.id
+                ORDER BY pn.created_at DESC
+                LIMIT ?
+            """, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def mark_notification_read(self, notification_id: int) -> bool:
+        """Mark a notification as read"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE purchase_notifications SET is_read = 1 WHERE id = ?", (notification_id,))
+            return cursor.rowcount > 0
+    
+    def mark_all_notifications_read(self) -> int:
+        """Mark all notifications as read"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE purchase_notifications SET is_read = 1 WHERE is_read = 0")
+            return cursor.rowcount
     
     # ==================== ORDER OPERATIONS ====================
     
@@ -449,6 +585,42 @@ class DatabaseManager:
                 if order_id not in orders:
                     orders[order_id] = {
                         'id': order_id,
+                        'total': row['total'],
+                        'status': row['status'],
+                        'created_at': row['created_at'],
+                        'items': []
+                    }
+                orders[order_id]['items'].append({
+                    'guitar_id': row['guitar_id'],
+                    'guitar_name': f"{row['brand']} {row['guitar_name']}",
+                    'quantity': row['quantity'],
+                    'price': row['price_at_purchase']
+                })
+            
+            return list(orders.values())
+    
+    def get_all_orders(self, limit: int = 100) -> List[dict]:
+        """Get all orders (for admin)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT o.*, u.username, oi.guitar_id, oi.quantity, oi.price_at_purchase, g.name as guitar_name, g.brand
+                FROM orders o
+                JOIN users u ON o.user_id = u.id
+                JOIN order_items oi ON o.id = oi.order_id
+                JOIN guitars g ON oi.guitar_id = g.id
+                ORDER BY o.created_at DESC
+                LIMIT ?
+            """, (limit,))
+            
+            orders = {}
+            for row in cursor.fetchall():
+                order_id = row['id']
+                if order_id not in orders:
+                    orders[order_id] = {
+                        'id': order_id,
+                        'user_id': row['user_id'],
+                        'username': row['username'],
                         'total': row['total'],
                         'status': row['status'],
                         'created_at': row['created_at'],
@@ -514,11 +686,70 @@ class DatabaseManager:
             
             cursor.execute("""
                 SELECT brand, SUM(stock) as count
-                FROM guitars GROUP BY brand
+                FROM guitars GROUP BY brand ORDER BY count DESC
             """)
             stats['by_brand'] = {row['brand']: row['count'] for row in cursor.fetchall()}
             
+            # Count guitars per brand (unique models)
+            cursor.execute("""
+                SELECT brand, COUNT(*) as model_count
+                FROM guitars GROUP BY brand ORDER BY model_count DESC
+            """)
+            stats['models_by_brand'] = {row['brand']: row['model_count'] for row in cursor.fetchall()}
+            
+            # Sales statistics
+            cursor.execute("""
+                SELECT COUNT(*) as total_orders, 
+                       COALESCE(SUM(total), 0) as total_revenue
+                FROM orders WHERE status != 'cancelled'
+            """)
+            sales_stats = dict(cursor.fetchone())
+            stats['total_orders'] = sales_stats['total_orders']
+            stats['total_revenue'] = sales_stats['total_revenue']
+            
+            # Get active discounts count
+            cursor.execute("SELECT COUNT(*) as discounted FROM guitars WHERE discount_percent > 0")
+            stats['discounted_count'] = cursor.fetchone()['discounted']
+            
             return stats
+    
+    def get_brand_statistics(self) -> List[dict]:
+        """Get detailed statistics by brand"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    brand,
+                    COUNT(*) as model_count,
+                    SUM(stock) as total_stock,
+                    AVG(price) as avg_price,
+                    MIN(price) as min_price,
+                    MAX(price) as max_price,
+                    SUM(price * stock) as inventory_value
+                FROM guitars
+                GROUP BY brand
+                ORDER BY model_count DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_type_statistics(self) -> List[dict]:
+        """Get detailed statistics by guitar type"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    guitar_type,
+                    COUNT(*) as model_count,
+                    SUM(stock) as total_stock,
+                    AVG(price) as avg_price,
+                    MIN(price) as min_price,
+                    MAX(price) as max_price,
+                    SUM(price * stock) as inventory_value
+                FROM guitars
+                GROUP BY guitar_type
+                ORDER BY model_count DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
     
     # ==================== HELPER METHODS ====================
     
@@ -531,7 +762,7 @@ class DatabaseManager:
             except:
                 created_at = datetime.now()
         
-        return Guitar(
+        guitar = Guitar(
             id=row['id'],
             name=row['name'],
             brand=row['brand'],
@@ -543,6 +774,12 @@ class DatabaseManager:
             category_id=row['category_id'] if 'category_id' in row.keys() else None,
             created_at=created_at
         )
+        # Add discount_percent attribute
+        if 'discount_percent' in row.keys():
+            guitar.discount_percent = row['discount_percent'] or 0
+        else:
+            guitar.discount_percent = 0
+        return guitar
     
     def _row_to_user(self, row) -> User:
         """Convert database row to User object"""
@@ -553,7 +790,7 @@ class DatabaseManager:
             except:
                 created_at = datetime.now()
         
-        return User(
+        user = User(
             id=row['id'],
             username=row['username'],
             email=row['email'],
@@ -561,3 +798,13 @@ class DatabaseManager:
             role=UserRole(row['role']),
             created_at=created_at
         )
+        # Add online status attributes
+        if 'is_online' in row.keys():
+            user.is_online = bool(row['is_online'])
+        else:
+            user.is_online = False
+        if 'last_login' in row.keys():
+            user.last_login = row['last_login']
+        else:
+            user.last_login = None
+        return user

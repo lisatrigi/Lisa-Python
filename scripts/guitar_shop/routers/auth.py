@@ -159,6 +159,16 @@ def get_admin_user(current_user: dict = Depends(get_current_user)) -> dict:
     return current_user
 
 
+def get_customer_user(current_user: dict = Depends(get_current_user)) -> dict:
+    """Dependency to verify customer role (non-admin)"""
+    if current_user['role'] == UserRole.ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action is only available for customers"
+        )
+    return current_user
+
+
 # ==================== AUTH ROUTES ====================
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -219,6 +229,9 @@ def login_user(credentials: UserLogin):
             detail="Invalid username or password"
         )
     
+    # Set user as online
+    db.set_user_online(user.id, True)
+    
     token = AuthManager.generate_token(user)
     
     return TokenResponse(
@@ -239,9 +252,10 @@ def get_current_user_profile(current_user: dict = Depends(get_current_user)):
 
 @router.post("/logout")
 def logout_user(current_user: dict = Depends(get_current_user)):
-    """Logout user (client should discard token)"""
+    """Logout user (set offline status and client should discard token)"""
+    db.set_user_online(current_user['user_id'], False)
     return {"message": "Successfully logged out"}
 
 
 # Export AuthManager for use in other modules
-__all__ = ['router', 'AuthManager', 'get_current_user', 'get_admin_user']
+__all__ = ['router', 'AuthManager', 'get_current_user', 'get_admin_user', 'get_customer_user']

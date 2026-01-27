@@ -47,9 +47,39 @@ st.markdown("""
         font-weight: bold;
     }
     
+    .discount-price {
+        font-size: 1.5rem;
+        color: #e63946;
+        font-weight: bold;
+    }
+    
+    .original-price {
+        font-size: 1rem;
+        color: #888;
+        text-decoration: line-through;
+    }
+    
     .stock-good { color: #2d6a4f; }
     .stock-low { color: #e76f51; }
     .stock-out { color: #9d0208; }
+    
+    .notification-badge {
+        background-color: #e63946;
+        color: white;
+        border-radius: 50%;
+        padding: 2px 8px;
+        font-size: 0.8rem;
+        margin-left: 5px;
+    }
+    
+    .online-indicator {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        background-color: #2d6a4f;
+        border-radius: 50%;
+        margin-right: 5px;
+    }
     
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -66,6 +96,8 @@ if "page" not in st.session_state:
     st.session_state.page = "login"
 if "cart" not in st.session_state:
     st.session_state.cart = {}
+if "selected_category" not in st.session_state:
+    st.session_state.selected_category = None
 
 
 # ==================== API HELPER FUNCTIONS ====================
@@ -106,18 +138,26 @@ def api_request(method: str, endpoint: str, data: dict = None, auth: bool = Fals
 
 def logout():
     """Clear session and logout"""
+    # Call logout endpoint to set user offline
+    api_request("POST", "/auth/logout", auth=True)
     st.session_state.token = None
     st.session_state.user = None
     st.session_state.cart = {}
     st.session_state.page = "login"
+    st.session_state.selected_category = None
 
 
 def get_cart_summary():
     """Calculate cart totals from local cart"""
     cart = st.session_state.cart
     total_items = sum(item["quantity"] for item in cart.values())
-    total_price = sum(item["guitar"]["price"] * item["quantity"] for item in cart.values())
+    total_price = sum(item.get("effective_price", item["guitar"]["price"]) * item["quantity"] for item in cart.values())
     return total_items, total_price
+
+
+def is_admin():
+    """Check if current user is admin"""
+    return st.session_state.user and st.session_state.user.get('role') == 'admin'
 
 
 # ==================== LOGIN PAGE ====================
@@ -155,12 +195,16 @@ def show_login_page():
                         if result:
                             st.session_state.token = result["access_token"]
                             st.session_state.user = result["user"]
-                            st.session_state.page = "catalog"
+                            # Admins go to admin dashboard, customers go to catalog
+                            if result["user"].get("role") == "admin":
+                                st.session_state.page = "admin"
+                            else:
+                                st.session_state.page = "catalog"
                             st.success("Login successful!")
                             st.rerun()
             
             st.markdown("---")
-            st.info("Demo accounts: **admin/Admin123** or register a new account")
+            st.info("Demo accounts: **admin/Admin123** (Admin) or register a new account (Customer)")
         
         with tab_register:
             st.subheader("Create Account")
@@ -207,6 +251,11 @@ def show_catalog():
     
     st.markdown("<h1 class='main-header'>Guitar Catalog</h1>", unsafe_allow_html=True)
     
+    # Check if we should filter by category
+    selected_type = "All Types"
+    if st.session_state.selected_category:
+        selected_type = st.session_state.selected_category
+    
     # Sidebar filters
     with st.sidebar:
         st.header("Filters")
@@ -225,22 +274,35 @@ def show_catalog():
         type_options = ["All Types"]
         if categories:
             type_options += [cat["name"] for cat in categories]
-        selected_type = st.selectbox("Guitar Type", type_options)
+        
+        # Use selected category if set, otherwise use dropdown
+        selected_type = st.selectbox(
+            "Guitar Type", 
+            type_options,
+            index=type_options.index(st.session_state.selected_category) if st.session_state.selected_category in type_options else 0
+        )
+        
+        # Clear category filter button
+        if st.session_state.selected_category:
+            if st.button("Clear Category Filter"):
+                st.session_state.selected_category = None
+                st.rerun()
         
         # In stock only
         in_stock_only = st.checkbox("In Stock Only", value=True)
         
         st.markdown("---")
         
-        # Cart summary in sidebar
-        total_items, total_price = get_cart_summary()
-        if total_items > 0:
-            st.subheader("Cart Summary")
-            st.metric("Items", total_items)
-            st.metric("Total", f"${total_price:,.2f}")
-            if st.button("View Cart", type="primary", use_container_width=True):
-                st.session_state.page = "cart"
-                st.rerun()
+        # Cart summary in sidebar (only for customers)
+        if not is_admin():
+            total_items, total_price = get_cart_summary()
+            if total_items > 0:
+                st.subheader("Cart Summary")
+                st.metric("Items", total_items)
+                st.metric("Total", f"${total_price:,.2f}")
+                if st.button("View Cart", type="primary", use_container_width=True):
+                    st.session_state.page = "cart"
+                    st.rerun()
     
     # Build query parameters for API
     params = {
@@ -251,6 +313,9 @@ def show_catalog():
     
     if selected_type != "All Types":
         params["guitar_type"] = selected_type.lower()
+        st.session_state.selected_category = selected_type
+    else:
+        st.session_state.selected_category = None
     
     # Fetch guitars from FastAPI
     guitars = api_request("GET", "/guitars", params)
@@ -258,6 +323,10 @@ def show_catalog():
     if guitars is None:
         st.warning("Unable to load guitars. Please check if the API is running.")
         return
+    
+    # Show current filter
+    if selected_type != "All Types":
+        st.info(f"Showing {selected_type} guitars only")
     
     st.subheader(f"Showing {len(guitars)} guitars")
     
@@ -280,7 +349,17 @@ def show_catalog():
                 st.caption(f"Type: {guitar['guitar_type'].capitalize()}")
                 st.markdown(f"_{guitar.get('description', '')}_")
                 
-                st.markdown(f"<p class='price-tag'>${guitar['price']:,.2f}</p>", unsafe_allow_html=True)
+                # Show price with discount if applicable
+                discount = guitar.get('discount_percent', 0)
+                if discount > 0:
+                    original_price = guitar.get('original_price', guitar['price'])
+                    discounted_price = guitar.get('discounted_price', guitar['price'] * (1 - discount / 100))
+                    st.markdown(f"<p class='original-price'>${original_price:,.2f}</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p class='discount-price'>${discounted_price:,.2f} ({discount:.0f}% OFF)</p>", unsafe_allow_html=True)
+                    effective_price = discounted_price
+                else:
+                    st.markdown(f"<p class='price-tag'>${guitar['price']:,.2f}</p>", unsafe_allow_html=True)
+                    effective_price = guitar['price']
                 
                 stock = guitar['stock']
                 if stock > 10:
@@ -290,26 +369,28 @@ def show_catalog():
                 else:
                     st.error("Out of Stock")
                 
-                # Add to cart button
-                if stock > 0:
-                    if st.button(f"Add to Cart", key=f"add_{guitar['id']}", use_container_width=True):
-                        guitar_id = str(guitar['id'])
-                        if guitar_id in st.session_state.cart:
-                            current_qty = st.session_state.cart[guitar_id]["quantity"]
-                            if current_qty < stock:
-                                st.session_state.cart[guitar_id]["quantity"] += 1
-                                st.success(f"Added another {guitar['name']}!")
+                # Add to cart button (only for customers, not admins)
+                if not is_admin():
+                    if stock > 0:
+                        if st.button(f"Add to Cart", key=f"add_{guitar['id']}", use_container_width=True):
+                            guitar_id = str(guitar['id'])
+                            if guitar_id in st.session_state.cart:
+                                current_qty = st.session_state.cart[guitar_id]["quantity"]
+                                if current_qty < stock:
+                                    st.session_state.cart[guitar_id]["quantity"] += 1
+                                    st.success(f"Added another {guitar['name']}!")
+                                else:
+                                    st.warning("Maximum stock reached")
                             else:
-                                st.warning("Maximum stock reached")
-                        else:
-                            st.session_state.cart[guitar_id] = {
-                                "guitar": guitar,
-                                "quantity": 1
-                            }
-                            st.success(f"Added {guitar['brand']} {guitar['name']} to cart!")
-                        st.rerun()
-                else:
-                    st.button("Out of Stock", key=f"oos_{guitar['id']}", disabled=True, use_container_width=True)
+                                st.session_state.cart[guitar_id] = {
+                                    "guitar": guitar,
+                                    "quantity": 1,
+                                    "effective_price": effective_price
+                                }
+                                st.success(f"Added {guitar['brand']} {guitar['name']} to cart!")
+                            st.rerun()
+                    else:
+                        st.button("Out of Stock", key=f"oos_{guitar['id']}", disabled=True, use_container_width=True)
                 
                 st.markdown("---")
 
@@ -317,7 +398,15 @@ def show_catalog():
 # ==================== CART PAGE ====================
 
 def show_cart():
-    """Display shopping cart and checkout"""
+    """Display shopping cart and checkout (Customers only)"""
+    
+    # Admin cannot access cart
+    if is_admin():
+        st.error("Administrators cannot purchase guitars. Please use a customer account.")
+        if st.button("Go to Admin Dashboard"):
+            st.session_state.page = "admin"
+            st.rerun()
+        return
     
     st.markdown("<h1 class='main-header'>Shopping Cart</h1>", unsafe_allow_html=True)
     
@@ -334,6 +423,7 @@ def show_cart():
     for guitar_id, item in list(cart.items()):
         guitar = item["guitar"]
         quantity = item["quantity"]
+        effective_price = item.get("effective_price", guitar["price"])
         
         col1, col2, col3, col4, col5 = st.columns([1, 3, 1, 1, 1])
         
@@ -346,9 +436,11 @@ def show_cart():
         with col2:
             st.markdown(f"**{guitar['brand']} {guitar['name']}**")
             st.caption(f"{guitar['guitar_type'].capitalize()}")
+            if guitar.get('discount_percent', 0) > 0:
+                st.caption(f"{guitar['discount_percent']:.0f}% discount applied")
         
         with col3:
-            st.markdown(f"**${guitar['price']:,.2f}**")
+            st.markdown(f"**${effective_price:,.2f}**")
         
         with col4:
             new_qty = st.number_input(
@@ -383,7 +475,8 @@ def show_cart():
         for item in cart.values():
             guitar = item["guitar"]
             qty = item["quantity"]
-            st.caption(f"{guitar['brand']} {guitar['name']} x{qty} = ${guitar['price'] * qty:,.2f}")
+            effective_price = item.get("effective_price", guitar["price"])
+            st.caption(f"{guitar['brand']} {guitar['name']} x{qty} = ${effective_price * qty:,.2f}")
     
     with col2:
         st.markdown(f"## ${total_price:,.2f}")
@@ -401,7 +494,7 @@ def show_cart():
             
             if result:
                 st.session_state.cart = {}
-                st.success(f"Order #{result.get('order_id')} placed successfully!")
+                st.success(f"Order #{result.get('order_id')} placed successfully! Total: ${result.get('total', 0):,.2f}")
                 st.balloons()
         
         if st.button("Continue Shopping", use_container_width=True):
@@ -446,7 +539,9 @@ def show_categories():
                 if cat_guitars:
                     st.caption(f"{cat_guitars.get('count', 0)} guitars available")
                 
+                # Browse button - sets category filter and goes to catalog
                 if st.button(f"Browse {category['name']}", key=f"cat_{category['id']}", use_container_width=True):
+                    st.session_state.selected_category = category['name']
                     st.session_state.page = "catalog"
                     st.rerun()
                 
@@ -483,20 +578,21 @@ def show_profile():
     
     st.markdown("---")
     
-    # Order history from API
-    st.subheader("Order History")
-    
-    orders = api_request("GET", "/guitars/orders/history", auth=True)
-    
-    if orders and orders.get("orders"):
-        for order in orders["orders"]:
-            with st.expander(f"Order #{order['id']} - ${order['total']:,.2f} ({order['status'].upper()})"):
-                st.markdown(f"**Date:** {order['created_at']}")
-                st.markdown("**Items:**")
-                for item in order['items']:
-                    st.markdown(f"- {item['guitar_name']} x{item['quantity']} @ ${item['price']:,.2f}")
-    else:
-        st.info("No orders yet. Start shopping!")
+    # Order history from API (not for admins)
+    if not is_admin():
+        st.subheader("Order History")
+        
+        orders = api_request("GET", "/guitars/orders/history", auth=True)
+        
+        if orders and orders.get("orders"):
+            for order in orders["orders"]:
+                with st.expander(f"Order #{order['id']} - ${order['total']:,.2f} ({order['status'].upper()})"):
+                    st.markdown(f"**Date:** {order['created_at']}")
+                    st.markdown("**Items:**")
+                    for item in order['items']:
+                        st.markdown(f"- {item['guitar_name']} x{item['quantity']} @ ${item['price']:,.2f}")
+        else:
+            st.info("No orders yet. Start shopping!")
     
     st.markdown("---")
     
@@ -508,39 +604,268 @@ def show_profile():
 # ==================== ADMIN DASHBOARD ====================
 
 def show_admin_dashboard():
-    """Display admin dashboard"""
+    """Display admin dashboard with full management capabilities"""
     
     st.markdown("<h1 class='main-header'>Admin Dashboard</h1>", unsafe_allow_html=True)
     
-    if not st.session_state.user or st.session_state.user.get('role') != 'admin':
+    if not is_admin():
         st.error("Access denied. Admin privileges required.")
         return
     
-    # Get stats from API
-    stats = api_request("GET", "/stats")
+    # Create tabs for different admin sections
+    tab_overview, tab_users, tab_inventory, tab_orders, tab_discounts, tab_add_guitar = st.tabs([
+        "Overview", "Online Users", "Inventory & Stats", "Orders & Notifications", "Discounts", "Add Guitar"
+    ])
     
-    if stats:
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Products", stats.get("total_products", 0))
-        col2.metric("Total Units", stats.get("total_units", 0))
-        col3.metric("Inventory Value", f"${stats.get('total_value', 0):,.0f}")
-        col4.metric("Categories", len(stats.get("by_type", {})))
+    # ==================== OVERVIEW TAB ====================
+    with tab_overview:
+        st.subheader("Shop Overview")
+        
+        # Get stats from API
+        stats = api_request("GET", "/stats")
+        
+        if stats:
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total Products", stats.get("total_products", 0))
+            col2.metric("Total Units", stats.get("total_units", 0))
+            col3.metric("Inventory Value", f"${stats.get('total_value', 0):,.0f}")
+            col4.metric("Total Revenue", f"${stats.get('total_revenue', 0):,.0f}")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total Orders", stats.get("total_orders", 0))
+            col2.metric("Categories", len(stats.get("by_type", {})))
+            col3.metric("Brands", len(stats.get("by_brand", {})))
+            col4.metric("Active Discounts", stats.get("discounted_count", 0))
+        
+        # Check for unread notifications
+        notifications = api_request("GET", "/admin/notifications", {"unread_only": True}, auth=True)
+        if notifications and notifications.get("count", 0) > 0:
+            st.warning(f"You have {notifications['count']} unread purchase notifications!")
     
-    st.markdown("---")
+    # ==================== ONLINE USERS TAB ====================
+    with tab_users:
+        st.subheader("Currently Online Users")
+        
+        if st.button("Refresh Online Users", key="refresh_users"):
+            st.rerun()
+        
+        online_data = api_request("GET", "/admin/online-users", auth=True)
+        
+        if online_data:
+            st.metric("Online Customers", online_data.get("online_count", 0))
+            
+            if online_data.get("users"):
+                st.markdown("---")
+                for user in online_data["users"]:
+                    col1, col2, col3 = st.columns([1, 2, 2])
+                    with col1:
+                        st.markdown(f"<span class='online-indicator'></span> **{user['username']}**", unsafe_allow_html=True)
+                    with col2:
+                        st.caption(user['email'])
+                    with col3:
+                        if user.get('last_login'):
+                            st.caption(f"Last login: {user['last_login']}")
+            else:
+                st.info("No customers currently online.")
+        
+        st.markdown("---")
+        st.subheader("All Users")
+        
+        all_users = api_request("GET", "/users", auth=True)
+        if all_users:
+            for user in all_users:
+                if user['role'] != 'admin':
+                    st.markdown(f"- **{user['username']}** ({user['email']}) - {user['role']}")
     
-    # Inventory by type
-    st.subheader("Inventory by Type")
-    if stats and stats.get("by_type"):
-        for type_name, count in stats["by_type"].items():
-            st.progress(min(count / 100, 1.0), text=f"{type_name.capitalize()}: {count} units")
+    # ==================== INVENTORY & STATS TAB ====================
+    with tab_inventory:
+        st.subheader("Inventory Statistics")
+        
+        # Get detailed brand statistics
+        brand_stats = api_request("GET", "/admin/brand-statistics", auth=True)
+        type_stats = api_request("GET", "/admin/type-statistics", auth=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Guitars by Brand")
+            if brand_stats and brand_stats.get("brands"):
+                for brand in brand_stats["brands"]:
+                    st.markdown(f"**{brand['brand']}**")
+                    st.progress(min(brand['model_count'] / 10, 1.0))
+                    st.caption(f"{brand['model_count']} models | {brand['total_stock']} units | Avg: ${brand['avg_price']:,.0f}")
+        
+        with col2:
+            st.markdown("#### Guitars by Type")
+            if type_stats and type_stats.get("types"):
+                for gtype in type_stats["types"]:
+                    st.markdown(f"**{gtype['guitar_type'].capitalize()}**")
+                    st.progress(min(gtype['model_count'] / 10, 1.0))
+                    st.caption(f"{gtype['model_count']} models | {gtype['total_stock']} units | Value: ${gtype['inventory_value']:,.0f}")
+        
+        st.markdown("---")
+        st.subheader("Brand Statistics Chart")
+        
+        if brand_stats and brand_stats.get("brands"):
+            import pandas as pd
+            
+            df = pd.DataFrame(brand_stats["brands"])
+            
+            # Bar chart for models by brand
+            st.bar_chart(df.set_index('brand')['model_count'])
+            
+            st.markdown("#### Stock by Brand")
+            st.bar_chart(df.set_index('brand')['total_stock'])
+            
+            st.markdown("#### Inventory Value by Brand")
+            st.bar_chart(df.set_index('brand')['inventory_value'])
     
-    st.markdown("---")
+    # ==================== ORDERS & NOTIFICATIONS TAB ====================
+    with tab_orders:
+        st.subheader("Purchase Notifications")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            show_unread_only = st.checkbox("Show unread only", value=False)
+        with col2:
+            if st.button("Mark All Read"):
+                result = api_request("POST", "/admin/notifications/mark-read", {"mark_all": True}, auth=True)
+                if result:
+                    st.success(result.get("message", "Done"))
+                    st.rerun()
+        
+        notifications = api_request("GET", "/admin/notifications", {"unread_only": show_unread_only}, auth=True)
+        
+        if notifications and notifications.get("notifications"):
+            for notif in notifications["notifications"]:
+                is_unread = not notif.get("is_read", True)
+                icon = "NEW" if is_unread else ""
+                
+                with st.expander(f"{'[NEW] ' if is_unread else ''}Order #{notif['order_id']} - {notif['username']} - ${notif['total']:,.2f}"):
+                    st.markdown(f"**Customer:** {notif['username']}")
+                    st.markdown(f"**Total:** ${notif['total']:,.2f}")
+                    st.markdown(f"**Date:** {notif['created_at']}")
+                    st.markdown(f"**Status:** {notif.get('order_status', 'pending').upper()}")
+                    
+                    if is_unread:
+                        if st.button("Mark as Read", key=f"read_{notif['id']}"):
+                            api_request("POST", "/admin/notifications/mark-read", {"notification_id": notif['id']}, auth=True)
+                            st.rerun()
+        else:
+            st.info("No notifications to display.")
+        
+        st.markdown("---")
+        st.subheader("All Orders")
+        
+        orders = api_request("GET", "/admin/orders", auth=True)
+        
+        if orders and orders.get("orders"):
+            for order in orders["orders"]:
+                with st.expander(f"Order #{order['id']} - {order['username']} - ${order['total']:,.2f} ({order['status'].upper()})"):
+                    st.markdown(f"**Customer:** {order['username']}")
+                    st.markdown(f"**Date:** {order['created_at']}")
+                    st.markdown("**Items:**")
+                    for item in order['items']:
+                        st.markdown(f"- {item['guitar_name']} x{item['quantity']} @ ${item['price']:,.2f}")
+        else:
+            st.info("No orders yet.")
     
-    # Inventory by brand
-    st.subheader("Inventory by Brand")
-    if stats and stats.get("by_brand"):
-        for brand, count in stats["by_brand"].items():
-            st.caption(f"{brand}: {count} units")
+    # ==================== DISCOUNTS TAB ====================
+    with tab_discounts:
+        st.subheader("Discount Management")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Apply Discount")
+            
+            discount_type = st.selectbox("Discount Target", ["Brand", "Type", "Specific Guitar"])
+            
+            if discount_type == "Brand":
+                brand_stats = api_request("GET", "/admin/brand-statistics", auth=True)
+                if brand_stats and brand_stats.get("brands"):
+                    brands = [b['brand'] for b in brand_stats["brands"]]
+                    selected_target = st.selectbox("Select Brand", brands)
+                    target_type = "brand"
+            elif discount_type == "Type":
+                selected_target = st.selectbox("Select Type", ["electric", "acoustic", "bass", "classical"])
+                target_type = "type"
+            else:
+                guitar_id = st.number_input("Guitar ID", min_value=1, step=1)
+                selected_target = str(guitar_id)
+                target_type = "guitar"
+            
+            discount_percent = st.slider("Discount Percentage", 0, 100, 10)
+            
+            if st.button("Apply Discount", type="primary"):
+                result = api_request("POST", "/admin/discounts", {
+                    "discount_percent": discount_percent,
+                    "target_type": target_type,
+                    "target_value": selected_target
+                }, auth=True)
+                if result:
+                    st.success(result.get("message", "Discount applied!"))
+                    st.rerun()
+        
+        with col2:
+            st.markdown("#### Active Discounts")
+            
+            discounted = api_request("GET", "/admin/discounted-guitars", auth=True)
+            
+            if discounted and discounted.get("guitars"):
+                st.metric("Guitars with Discounts", discounted.get("count", 0))
+                
+                for guitar in discounted["guitars"]:
+                    st.markdown(f"**{guitar['brand']} {guitar['name']}**")
+                    st.caption(f"Original: ${guitar['price']:,.2f} | Now: ${guitar['discounted_price']:,.2f} ({guitar['discount_percent']:.0f}% OFF)")
+            else:
+                st.info("No active discounts.")
+            
+            st.markdown("---")
+            
+            if st.button("Clear All Discounts", type="secondary"):
+                result = api_request("POST", "/admin/discounts/clear", auth=True)
+                if result:
+                    st.success(result.get("message", "Discounts cleared!"))
+                    st.rerun()
+    
+    # ==================== ADD GUITAR TAB ====================
+    with tab_add_guitar:
+        st.subheader("Add New Guitar to Inventory")
+        
+        with st.form("add_guitar_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                name = st.text_input("Guitar Name", placeholder="e.g., Player Stratocaster")
+                brand = st.text_input("Brand", placeholder="e.g., Fender")
+                guitar_type = st.selectbox("Guitar Type", ["electric", "acoustic", "bass", "classical"])
+                price = st.number_input("Price ($)", min_value=0.01, value=499.99, step=0.01)
+            
+            with col2:
+                stock = st.number_input("Initial Stock", min_value=0, value=10, step=1)
+                description = st.text_area("Description", placeholder="Enter guitar description...")
+                image_url = st.text_input("Image URL (optional)", placeholder="https://...")
+            
+            submitted = st.form_submit_button("Add Guitar", type="primary", use_container_width=True)
+            
+            if submitted:
+                if not name or not brand:
+                    st.error("Name and Brand are required!")
+                else:
+                    result = api_request("POST", "/admin/guitars", {
+                        "name": name,
+                        "brand": brand,
+                        "guitar_type": guitar_type,
+                        "price": price,
+                        "stock": stock,
+                        "description": description,
+                        "image_url": image_url or f"https://placeholder.svg?height=300&width=300&query={brand}+{guitar_type}+guitar"
+                    }, auth=True)
+                    
+                    if result:
+                        st.success(f"Successfully added {brand} {name} to inventory!")
+                        st.json(result.get("guitar", {}))
 
 
 # ==================== NAVIGATION ====================
@@ -554,6 +879,7 @@ def show_navigation():
         
         if st.session_state.user:
             st.markdown(f"Welcome, **{st.session_state.user['username']}**")
+            st.caption(f"Role: {'Administrator' if is_admin() else 'Customer'}")
             st.markdown("---")
             
             if st.button("Catalog", use_container_width=True):
@@ -564,20 +890,33 @@ def show_navigation():
                 st.session_state.page = "categories"
                 st.rerun()
             
-            if st.button("My Cart", use_container_width=True):
-                st.session_state.page = "cart"
-                st.rerun()
-            
-            if st.button("My Profile", use_container_width=True):
-                st.session_state.page = "profile"
-                st.rerun()
+            # Cart and profile only for customers
+            if not is_admin():
+                if st.button("My Cart", use_container_width=True):
+                    st.session_state.page = "cart"
+                    st.rerun()
+                
+                if st.button("My Profile", use_container_width=True):
+                    st.session_state.page = "profile"
+                    st.rerun()
             
             # Admin dashboard for admins
-            if st.session_state.user.get('role') == 'admin':
+            if is_admin():
                 st.markdown("---")
-                if st.button("Admin Dashboard", use_container_width=True):
-                    st.session_state.page = "admin"
-                    st.rerun()
+                st.markdown("### Admin")
+                
+                # Check for unread notifications
+                notifications = api_request("GET", "/admin/notifications", {"unread_only": True}, auth=True)
+                notif_count = notifications.get("count", 0) if notifications else 0
+                
+                if notif_count > 0:
+                    if st.button(f"Admin Dashboard ({notif_count} new)", use_container_width=True, type="primary"):
+                        st.session_state.page = "admin"
+                        st.rerun()
+                else:
+                    if st.button("Admin Dashboard", use_container_width=True):
+                        st.session_state.page = "admin"
+                        st.rerun()
             
             st.markdown("---")
             if st.button("Logout", type="secondary", use_container_width=True):

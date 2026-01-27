@@ -8,17 +8,40 @@ import sys
 import os
 import random
 from contextlib import asynccontextmanager
+from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Depends, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 # Add current directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from database import DatabaseManager
-from models import User, UserRole, GuitarType, Guitar
+from models import User, UserRole, GuitarType, Guitar, GuitarCreate
 from routers import auth_router, user_router, guitar_router, category_router
-from routers.auth import AuthManager
+from routers.auth import AuthManager, get_current_user, get_admin_user
+
+
+# ==================== PYDANTIC MODELS FOR API ====================
+
+class DiscountRequest(BaseModel):
+    """Request model for applying discounts"""
+    discount_percent: float = Field(..., ge=0, le=100)
+    target_type: str = Field(..., description="Type of target: 'guitar', 'brand', or 'type'")
+    target_value: str = Field(..., description="Guitar ID, brand name, or guitar type")
+
+
+class NotificationResponse(BaseModel):
+    """Response model for notifications"""
+    id: int
+    order_id: int
+    user_id: int
+    username: str
+    total: float
+    is_read: bool
+    created_at: str
+    order_status: str
 
 
 # ==================== WEB SCRAPER ====================
@@ -201,6 +224,9 @@ app = FastAPI(
     - Guitar Management (Electric, Acoustic, Bass, Classical)
     - Shopping Cart & Orders
     - Category Management
+    - Admin Dashboard with Statistics
+    - Discount Management
+    - Real-time Notifications
     
     ## Authentication
     - POST /api/auth/register - Register new account
@@ -210,8 +236,14 @@ app = FastAPI(
     - GET /api/guitars - Browse all guitars
     - POST /api/guitars/cart/add - Add to cart (requires auth)
     - POST /api/guitars/purchase - Complete purchase (requires auth)
+    
+    ## Admin
+    - GET /api/admin/online-users - View online users
+    - GET /api/admin/notifications - View purchase notifications
+    - POST /api/admin/discounts - Manage discounts
+    - POST /api/admin/guitars - Add new guitars
     """,
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -238,7 +270,7 @@ def root():
     """API root endpoint"""
     return {
         "name": "StringMaster Guitar Shop API",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "status": "running",
         "docs": "/docs"
     }
@@ -266,14 +298,227 @@ def get_shop_stats():
         "total_units": stats.get('total_units', 0),
         "total_value": round(stats.get('total_value', 0) or 0, 2),
         "by_type": stats.get('by_type', {}),
-        "by_brand": stats.get('by_brand', {})
+        "by_brand": stats.get('by_brand', {}),
+        "models_by_brand": stats.get('models_by_brand', {}),
+        "total_orders": stats.get('total_orders', 0),
+        "total_revenue": round(stats.get('total_revenue', 0) or 0, 2),
+        "discounted_count": stats.get('discounted_count', 0)
     }
+
+
+# ==================== ADMIN API ROUTES ====================
+
+@app.get("/api/admin/online-users")
+def get_online_users(admin: dict = Depends(get_admin_user)):
+    """Get all currently online users (Admin only)"""
+    users = db.get_online_users()
+    return {
+        "online_count": len(users),
+        "users": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "last_login": getattr(u, 'last_login', None)
+            }
+            for u in users
+        ]
+    }
+
+
+@app.get("/api/admin/notifications")
+def get_notifications(
+    unread_only: bool = Query(False),
+    limit: int = Query(50, ge=1, le=200),
+    admin: dict = Depends(get_admin_user)
+):
+    """Get purchase notifications (Admin only)"""
+    if unread_only:
+        notifications = db.get_unread_notifications()
+    else:
+        notifications = db.get_all_notifications(limit)
+    
+    return {
+        "count": len(notifications),
+        "notifications": notifications
+    }
+
+
+@app.post("/api/admin/notifications/mark-read")
+def mark_notifications_read(
+    notification_id: Optional[int] = Body(None),
+    mark_all: bool = Body(False),
+    admin: dict = Depends(get_admin_user)
+):
+    """Mark notification(s) as read (Admin only)"""
+    if mark_all:
+        count = db.mark_all_notifications_read()
+        return {"message": f"Marked {count} notifications as read"}
+    elif notification_id:
+        success = db.mark_notification_read(notification_id)
+        if success:
+            return {"message": "Notification marked as read"}
+        raise HTTPException(status_code=404, detail="Notification not found")
+    else:
+        raise HTTPException(status_code=400, detail="Specify notification_id or mark_all=true")
+
+
+@app.get("/api/admin/orders")
+def get_all_orders(
+    limit: int = Query(100, ge=1, le=500),
+    admin: dict = Depends(get_admin_user)
+):
+    """Get all orders (Admin only)"""
+    orders = db.get_all_orders(limit)
+    return {
+        "count": len(orders),
+        "orders": orders
+    }
+
+
+@app.get("/api/admin/brand-statistics")
+def get_brand_statistics(admin: dict = Depends(get_admin_user)):
+    """Get detailed statistics by brand (Admin only)"""
+    stats = db.get_brand_statistics()
+    return {
+        "brands": stats,
+        "total_brands": len(stats)
+    }
+
+
+@app.get("/api/admin/type-statistics")
+def get_type_statistics(admin: dict = Depends(get_admin_user)):
+    """Get detailed statistics by guitar type (Admin only)"""
+    stats = db.get_type_statistics()
+    return {
+        "types": stats,
+        "total_types": len(stats)
+    }
+
+
+@app.post("/api/admin/discounts")
+def apply_discount(
+    request: DiscountRequest,
+    admin: dict = Depends(get_admin_user)
+):
+    """Apply discount to guitars (Admin only)"""
+    target_type = request.target_type.lower()
+    
+    try:
+        if target_type == "guitar":
+            # Apply to specific guitar by ID
+            guitar_id = int(request.target_value)
+            success = db.apply_discount_to_guitar(guitar_id, request.discount_percent)
+            if success:
+                return {"message": f"Applied {request.discount_percent}% discount to guitar ID {guitar_id}"}
+            raise HTTPException(status_code=404, detail="Guitar not found")
+        
+        elif target_type == "brand":
+            # Apply to all guitars of a brand
+            count = db.apply_discount_to_brand(request.target_value, request.discount_percent)
+            return {"message": f"Applied {request.discount_percent}% discount to {count} {request.target_value} guitars"}
+        
+        elif target_type == "type":
+            # Apply to all guitars of a type
+            count = db.apply_discount_to_type(request.target_value, request.discount_percent)
+            return {"message": f"Applied {request.discount_percent}% discount to {count} {request.target_value} guitars"}
+        
+        else:
+            raise HTTPException(status_code=400, detail="Invalid target_type. Use 'guitar', 'brand', or 'type'")
+    
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/admin/discounts/clear")
+def clear_discounts(admin: dict = Depends(get_admin_user)):
+    """Clear all discounts (Admin only)"""
+    count = db.clear_all_discounts()
+    return {"message": f"Cleared discounts from {count} guitars"}
+
+
+@app.get("/api/admin/discounted-guitars")
+def get_discounted_guitars(admin: dict = Depends(get_admin_user)):
+    """Get all guitars with active discounts (Admin only)"""
+    guitars = db.get_discounted_guitars()
+    return {
+        "count": len(guitars),
+        "guitars": [
+            {
+                **g.to_dict(),
+                "discount_percent": getattr(g, 'discount_percent', 0),
+                "discounted_price": round(g.price * (1 - getattr(g, 'discount_percent', 0) / 100), 2)
+            }
+            for g in guitars
+        ]
+    }
+
+
+@app.post("/api/admin/guitars", status_code=status.HTTP_201_CREATED)
+def admin_create_guitar(
+    guitar_data: GuitarCreate,
+    admin: dict = Depends(get_admin_user)
+):
+    """Create a new guitar (Admin only) - dedicated admin endpoint"""
+    guitar = Guitar(
+        name=guitar_data.name,
+        brand=guitar_data.brand,
+        guitar_type=guitar_data.guitar_type,
+        price=guitar_data.price,
+        stock=guitar_data.stock,
+        description=guitar_data.description,
+        image_url=guitar_data.image_url
+    )
+    
+    # Check if guitar already exists
+    if db.guitar_exists(guitar.name, guitar.brand):
+        raise HTTPException(status_code=400, detail="Guitar with this name and brand already exists")
+    
+    guitar_id = db.create_guitar(guitar)
+    guitar.id = guitar_id
+    
+    return {
+        "message": f"Successfully added {guitar.brand} {guitar.name} to inventory",
+        "guitar": guitar.to_dict()
+    }
+
+
+@app.put("/api/admin/guitars/{guitar_id}/stock")
+def update_guitar_stock(
+    guitar_id: int,
+    stock: int = Body(..., ge=0),
+    admin: dict = Depends(get_admin_user)
+):
+    """Update guitar stock (Admin only)"""
+    guitar = db.get_guitar(guitar_id)
+    if not guitar:
+        raise HTTPException(status_code=404, detail="Guitar not found")
+    
+    success = db.update_guitar(guitar_id, stock=stock)
+    if success:
+        return {"message": f"Stock updated to {stock} for {guitar.brand} {guitar.name}"}
+    raise HTTPException(status_code=500, detail="Failed to update stock")
+
+
+@app.delete("/api/admin/guitars/{guitar_id}")
+def admin_delete_guitar(
+    guitar_id: int,
+    admin: dict = Depends(get_admin_user)
+):
+    """Delete a guitar (Admin only)"""
+    guitar = db.get_guitar(guitar_id)
+    if not guitar:
+        raise HTTPException(status_code=404, detail="Guitar not found")
+    
+    success = db.delete_guitar(guitar_id)
+    if success:
+        return {"message": f"Successfully deleted {guitar.brand} {guitar.name}"}
+    raise HTTPException(status_code=500, detail="Failed to delete guitar")
 
 
 # ==================== RUN SERVER ====================
 
 if __name__ == "__main__":
     import uvicorn
-    
     
     uvicorn.run(app, host="0.0.0.0", port=8000)
