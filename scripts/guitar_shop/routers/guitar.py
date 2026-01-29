@@ -1,8 +1,3 @@
-"""
-Guitar Router - StringMaster Guitar Shop
-Handles guitar CRUD operations and purchases via FastAPI
-"""
-
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 
@@ -15,14 +10,10 @@ from routers.auth import get_current_user, get_admin_user, get_customer_user
 
 router = APIRouter(prefix="/api/guitars", tags=["Guitars"])
 
-# Database instance
 db = DatabaseManager("guitar_shop.db")
 
-# In-memory cart storage (per user session)
 user_carts: dict[int, ShoppingCart] = {}
 
-
-# ==================== GUITAR ROUTES ====================
 
 @router.get("/", response_model=List[dict])
 def list_guitars(
@@ -33,10 +24,6 @@ def list_guitars(
     in_stock: bool = Query(False, description="Only show in-stock items"),
     category_id: Optional[int] = Query(None, description="Filter by category ID")
 ):
-    """
-    List all guitars with optional filters
-    - No authentication required for browsing
-    """
     guitars = db.get_all_guitars(
         guitar_type=guitar_type,
         brand=brand,
@@ -46,7 +33,6 @@ def list_guitars(
         category_id=category_id
     )
     
-    # Include discount information in response
     result = []
     for g in guitars:
         guitar_dict = g.to_dict()
@@ -62,7 +48,6 @@ def list_guitars(
 
 @router.get("/{guitar_id}")
 def get_guitar(guitar_id: int):
-    """Get single guitar by ID"""
     guitar = db.get_guitar(guitar_id)
     
     if not guitar:
@@ -83,7 +68,6 @@ def create_guitar(
     guitar_data: GuitarCreate,
     admin: dict = Depends(get_admin_user)
 ):
-    """Create a new guitar (Admin only)"""
     guitar = Guitar(
         name=guitar_data.name,
         brand=guitar_data.brand,
@@ -106,7 +90,6 @@ def update_guitar(
     guitar_data: GuitarUpdate,
     admin: dict = Depends(get_admin_user)
 ):
-    """Update guitar details (Admin only)"""
     existing = db.get_guitar(guitar_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Guitar not found")
@@ -124,7 +107,6 @@ def update_guitar(
 
 @router.delete("/{guitar_id}")
 def delete_guitar(guitar_id: int, admin: dict = Depends(get_admin_user)):
-    """Delete a guitar (Admin only)"""
     if not db.get_guitar(guitar_id):
         raise HTTPException(status_code=404, detail="Guitar not found")
     
@@ -135,11 +117,8 @@ def delete_guitar(guitar_id: int, admin: dict = Depends(get_admin_user)):
     return {"message": "Guitar deleted successfully"}
 
 
-# ==================== CART ROUTES (Customers Only) ====================
-
 @router.get("/cart/items")
 def get_cart(current_user: dict = Depends(get_customer_user)):
-    """Get current user's shopping cart (Customers only - Admin cannot use cart)"""
     user_id = current_user['user_id']
     
     if user_id not in user_carts:
@@ -160,7 +139,6 @@ def get_cart(current_user: dict = Depends(get_customer_user)):
             "discount_percent": discount
         })
     
-    # Calculate total with discounts
     total = sum(item['subtotal'] for item in items)
     
     return {
@@ -175,7 +153,6 @@ def add_to_cart(
     item: CartItemCreate,
     current_user: dict = Depends(get_customer_user)
 ):
-    """Add item to cart (Customers only - Admin cannot purchase)"""
     user_id = current_user['user_id']
     
     if user_id not in user_carts:
@@ -200,7 +177,6 @@ def update_cart_item(
     quantity: int = Query(..., ge=0),
     current_user: dict = Depends(get_customer_user)
 ):
-    """Update cart item quantity (Customers only)"""
     user_id = current_user['user_id']
     
     if user_id not in user_carts:
@@ -221,7 +197,6 @@ def update_cart_item(
 
 @router.delete("/cart/{guitar_id}")
 def remove_from_cart(guitar_id: int, current_user: dict = Depends(get_customer_user)):
-    """Remove item from cart (Customers only)"""
     user_id = current_user['user_id']
     
     if user_id not in user_carts:
@@ -233,7 +208,6 @@ def remove_from_cart(guitar_id: int, current_user: dict = Depends(get_customer_u
 
 @router.delete("/cart/clear")
 def clear_cart(current_user: dict = Depends(get_customer_user)):
-    """Clear entire cart (Customers only)"""
     user_id = current_user['user_id']
     
     if user_id in user_carts:
@@ -242,17 +216,8 @@ def clear_cart(current_user: dict = Depends(get_customer_user)):
     return {"message": "Cart cleared"}
 
 
-# ==================== ORDER/PURCHASE ROUTES (Customers Only) ====================
-
 @router.post("/purchase", status_code=status.HTTP_201_CREATED)
 def purchase_guitars(current_user: dict = Depends(get_customer_user)):
-    """
-    Checkout cart and create order (Purchase)
-    - Customers only - Admin cannot purchase guitars
-    - Creates order from current cart
-    - Updates stock levels
-    - Creates notification for admin
-    """
     user_id = current_user['user_id']
     username = current_user['username']
     
@@ -261,7 +226,6 @@ def purchase_guitars(current_user: dict = Depends(get_customer_user)):
     
     cart = user_carts[user_id]
     
-    # Prepare order items with discount-adjusted prices
     items = []
     order_total = 0
     
@@ -273,7 +237,6 @@ def purchase_guitars(current_user: dict = Depends(get_customer_user)):
                 detail=f"Insufficient stock for {cart_item.guitar.name}"
             )
         
-        # Apply discount if any
         discount = getattr(guitar, 'discount_percent', 0)
         effective_price = guitar.price * (1 - discount / 100) if discount > 0 else guitar.price
         effective_price = round(effective_price, 2)
@@ -283,17 +246,13 @@ def purchase_guitars(current_user: dict = Depends(get_customer_user)):
     
     order_total = round(order_total, 2)
     
-    # Create order
     order_id = db.create_order(user_id, items, order_total)
     
-    # Create notification for admin
     db.create_purchase_notification(order_id, user_id, username, order_total)
     
-    # Update stock for each item
     for guitar_id, quantity, _ in items:
         db.update_stock(guitar_id, -quantity)
     
-    # Clear cart
     cart.clear()
     
     return {
@@ -305,6 +264,5 @@ def purchase_guitars(current_user: dict = Depends(get_customer_user)):
 
 @router.get("/orders/history")
 def get_order_history(current_user: dict = Depends(get_current_user)):
-    """Get current user's order history"""
     orders = db.get_user_orders(current_user['user_id'])
     return {"orders": orders}

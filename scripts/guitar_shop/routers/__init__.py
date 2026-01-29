@@ -1,8 +1,3 @@
-"""
-Routers Package - StringMaster Guitar Shop
-FastAPI routers for handling different API endpoints
-"""
-
 from routers.auth import router as auth_router
 from routers.user import router as user_router
 from routers.guitar import router as guitar_router

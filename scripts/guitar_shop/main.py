@@ -1,9 +1,3 @@
-"""
-StringMaster Guitar Shop - Main FastAPI Application
-Entry point for the FastAPI backend server
-Handles all routing, business logic, and database communication
-"""
-
 import sys
 import os
 import random
@@ -14,7 +8,6 @@ from fastapi import FastAPI, HTTPException, status, Depends, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-# Add current directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from database import DatabaseManager
@@ -23,17 +16,13 @@ from routers import auth_router, user_router, guitar_router, category_router
 from routers.auth import AuthManager, get_current_user, get_admin_user
 
 
-# ==================== PYDANTIC MODELS FOR API ====================
-
 class DiscountRequest(BaseModel):
-    """Request model for applying discounts"""
     discount_percent: float = Field(..., ge=0, le=100)
     target_type: str = Field(..., description="Type of target: 'guitar', 'brand', or 'type'")
     target_value: str = Field(..., description="Guitar ID, brand name, or guitar type")
 
 
 class NotificationResponse(BaseModel):
-    """Response model for notifications"""
     id: int
     order_id: int
     user_id: int
@@ -44,16 +33,8 @@ class NotificationResponse(BaseModel):
     order_status: str
 
 
-# ==================== WEB SCRAPER ====================
-
-class GuitarScraper:
-    """
-    Guitar data scraper for populating the database
-    Uses web scraping techniques with requests and BeautifulSoup
-    """
-    
+class GuitarScraper: #web scraping
     GUITAR_CATALOG = [
-        # Electric Guitars
         {"name": "Player Stratocaster", "brand": "Fender", "price": 849.99, "type": "electric",
          "description": "Classic Fender tone with modern playability. Alder body, maple neck, 3 single-coil pickups.",
          "image": "https://placeholder.svg?height=300&width=300&query=Fender+Stratocaster+electric+guitar"},
@@ -84,8 +65,6 @@ class GuitarScraper:
         {"name": "Pacifica 612VIIFM", "brand": "Yamaha", "price": 549.99, "type": "electric",
          "description": "Versatile guitar with Seymour Duncan pickups and flamed maple top.",
          "image": "https://placeholder.svg?height=300&width=300&query=Yamaha+Pacifica+612"},
-        
-        # Bass Guitars
         {"name": "Player Precision Bass", "brand": "Fender", "price": 849.99, "type": "bass",
          "description": "Industry standard bass with split single-coil pickup and modern C neck.",
          "image": "https://placeholder.svg?height=300&width=300&query=Fender+Precision+Bass"},
@@ -104,8 +83,6 @@ class GuitarScraper:
         {"name": "TRBX304", "brand": "Yamaha", "price": 349.99, "type": "bass",
          "description": "Solid bass guitar with Performance EQ active circuitry.",
          "image": "https://placeholder.svg?height=300&width=300&query=Yamaha+TRBX304+Bass"},
-        
-        # Acoustic Guitars
         {"name": "D-28", "brand": "Martin", "price": 3299.99, "type": "acoustic",
          "description": "The standard for acoustic guitars. Sitka spruce top, East Indian rosewood.",
          "image": "https://placeholder.svg?height=300&width=300&query=Martin+D-28+acoustic+guitar"},
@@ -133,8 +110,6 @@ class GuitarScraper:
         {"name": "FG800", "brand": "Yamaha", "price": 219.99, "type": "acoustic",
          "description": "Best-selling acoustic with solid spruce top and nato back/sides.",
          "image": "https://placeholder.svg?height=300&width=300&query=Yamaha+FG800+acoustic"},
-        
-        # Classical Guitars
         {"name": "C40", "brand": "Yamaha", "price": 159.99, "type": "classical",
          "description": "Perfect entry-level classical guitar. Spruce top, meranti back/sides.",
          "image": "https://placeholder.svg?height=300&width=300&query=Yamaha+C40+classical+guitar"},
@@ -156,7 +131,6 @@ class GuitarScraper:
     ]
     
     def populate_database(self, db: DatabaseManager) -> dict:
-        """Scrape guitars and populate the database"""
         existing_count = db.get_guitar_count()
         if existing_count > 0:
             return {"status": "skipped", "message": f"Database already has {existing_count} guitars", "added": 0}
@@ -179,75 +153,37 @@ class GuitarScraper:
         return {"status": "success", "message": f"Scraped and added {added_count} guitars to database", "added": added_count}
 
 
-# ==================== DATABASE & SERVICES ====================
-
 db = DatabaseManager("guitar_shop.db")
 scraper = GuitarScraper()
 
 
-# ==================== LIFESPAN ====================
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan event handler - runs on startup"""
     print("Starting StringMaster Guitar Shop API...")
-    
-    # Scrape and populate database on startup
     result = scraper.populate_database(db)
     print(f"Database initialization: {result['message']}")
     
-    # Create admin user if not exists
     if not db.get_user_by_username("admin"):
         admin = User(
             username="admin",
             email="admin@stringmaster.com",
-            password_hash=AuthManager.hash_password("Admin123"),
+            password_hash=AuthManager.hash_password("admin123"),
             role=UserRole.ADMIN
         )
         db.create_user(admin)
-        print("Created admin user (username: admin, password: Admin123)")
+        print("Created admin user (username: admin, password: admin123)")
     
     yield
-    
     print("Shutting down StringMaster Guitar Shop API...")
 
 
-# ==================== FASTAPI APP ====================
-
 app = FastAPI(
     title="StringMaster Guitar Shop API",
-    description="""
-    REST API for StringMaster Guitar Shop
-    
-    ## Features
-    - User Authentication & Authorization
-    - Guitar Management (Electric, Acoustic, Bass, Classical)
-    - Shopping Cart & Orders
-    - Category Management
-    - Admin Dashboard with Statistics
-    - Discount Management
-    - Real-time Notifications
-    
-    ## Authentication
-    - POST /api/auth/register - Register new account
-    - POST /api/auth/login - Login and get token
-    
-    ## Guitars
-    - GET /api/guitars - Browse all guitars
-    - POST /api/guitars/cart/add - Add to cart (requires auth)
-    - POST /api/guitars/purchase - Complete purchase (requires auth)
-    
-    ## Admin
-    - GET /api/admin/online-users - View online users
-    - GET /api/admin/notifications - View purchase notifications
-    - POST /api/admin/discounts - Manage discounts
-    - POST /api/admin/guitars - Add new guitars
-    """,
+    description="REST API for StringMaster Guitar Shop - Guitar Management, Shopping Cart, Orders, and Admin Dashboard",
     version="2.0.0",
     lifespan=lifespan
 )
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -256,18 +192,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(auth_router)
 app.include_router(user_router)
 app.include_router(guitar_router)
 app.include_router(category_router)
 
 
-# ==================== HEALTH & INFO ROUTES ====================
-
 @app.get("/")
 def root():
-    """API root endpoint"""
     return {
         "name": "StringMaster Guitar Shop API",
         "version": "2.0.0",
@@ -278,7 +210,6 @@ def root():
 
 @app.get("/api/health")
 def health_check():
-    """API health check endpoint"""
     guitar_count = db.get_guitar_count()
     categories = db.get_all_categories()
     return {
@@ -291,7 +222,6 @@ def health_check():
 
 @app.get("/api/stats")
 def get_shop_stats():
-    """Get shop statistics"""
     stats = db.get_inventory_stats()
     return {
         "total_products": stats.get('total_products', 0),
@@ -306,11 +236,8 @@ def get_shop_stats():
     }
 
 
-# ==================== ADMIN API ROUTES ====================
-
 @app.get("/api/admin/online-users")
 def get_online_users(admin: dict = Depends(get_admin_user)):
-    """Get all currently online users (Admin only)"""
     users = db.get_online_users()
     return {
         "online_count": len(users),
@@ -332,7 +259,6 @@ def get_notifications(
     limit: int = Query(50, ge=1, le=200),
     admin: dict = Depends(get_admin_user)
 ):
-    """Get purchase notifications (Admin only)"""
     if unread_only:
         notifications = db.get_unread_notifications()
     else:
@@ -350,7 +276,6 @@ def mark_notifications_read(
     mark_all: bool = Body(False),
     admin: dict = Depends(get_admin_user)
 ):
-    """Mark notification(s) as read (Admin only)"""
     if mark_all:
         count = db.mark_all_notifications_read()
         return {"message": f"Marked {count} notifications as read"}
@@ -368,7 +293,6 @@ def get_all_orders(
     limit: int = Query(100, ge=1, le=500),
     admin: dict = Depends(get_admin_user)
 ):
-    """Get all orders (Admin only)"""
     orders = db.get_all_orders(limit)
     return {
         "count": len(orders),
@@ -378,7 +302,6 @@ def get_all_orders(
 
 @app.get("/api/admin/brand-statistics")
 def get_brand_statistics(admin: dict = Depends(get_admin_user)):
-    """Get detailed statistics by brand (Admin only)"""
     stats = db.get_brand_statistics()
     return {
         "brands": stats,
@@ -388,7 +311,6 @@ def get_brand_statistics(admin: dict = Depends(get_admin_user)):
 
 @app.get("/api/admin/type-statistics")
 def get_type_statistics(admin: dict = Depends(get_admin_user)):
-    """Get detailed statistics by guitar type (Admin only)"""
     stats = db.get_type_statistics()
     return {
         "types": stats,
@@ -401,12 +323,10 @@ def apply_discount(
     request: DiscountRequest,
     admin: dict = Depends(get_admin_user)
 ):
-    """Apply discount to guitars (Admin only)"""
     target_type = request.target_type.lower()
     
     try:
         if target_type == "guitar":
-            # Apply to specific guitar by ID
             guitar_id = int(request.target_value)
             success = db.apply_discount_to_guitar(guitar_id, request.discount_percent)
             if success:
@@ -414,12 +334,10 @@ def apply_discount(
             raise HTTPException(status_code=404, detail="Guitar not found")
         
         elif target_type == "brand":
-            # Apply to all guitars of a brand
             count = db.apply_discount_to_brand(request.target_value, request.discount_percent)
             return {"message": f"Applied {request.discount_percent}% discount to {count} {request.target_value} guitars"}
         
         elif target_type == "type":
-            # Apply to all guitars of a type
             count = db.apply_discount_to_type(request.target_value, request.discount_percent)
             return {"message": f"Applied {request.discount_percent}% discount to {count} {request.target_value} guitars"}
         
@@ -432,14 +350,12 @@ def apply_discount(
 
 @app.post("/api/admin/discounts/clear")
 def clear_discounts(admin: dict = Depends(get_admin_user)):
-    """Clear all discounts (Admin only)"""
     count = db.clear_all_discounts()
     return {"message": f"Cleared discounts from {count} guitars"}
 
 
 @app.get("/api/admin/discounted-guitars")
 def get_discounted_guitars(admin: dict = Depends(get_admin_user)):
-    """Get all guitars with active discounts (Admin only)"""
     guitars = db.get_discounted_guitars()
     return {
         "count": len(guitars),
@@ -459,7 +375,6 @@ def admin_create_guitar(
     guitar_data: GuitarCreate,
     admin: dict = Depends(get_admin_user)
 ):
-    """Create a new guitar (Admin only) - dedicated admin endpoint"""
     guitar = Guitar(
         name=guitar_data.name,
         brand=guitar_data.brand,
@@ -470,7 +385,6 @@ def admin_create_guitar(
         image_url=guitar_data.image_url
     )
     
-    # Check if guitar already exists
     if db.guitar_exists(guitar.name, guitar.brand):
         raise HTTPException(status_code=400, detail="Guitar with this name and brand already exists")
     
@@ -489,7 +403,6 @@ def update_guitar_stock(
     stock: int = Body(..., ge=0),
     admin: dict = Depends(get_admin_user)
 ):
-    """Update guitar stock (Admin only)"""
     guitar = db.get_guitar(guitar_id)
     if not guitar:
         raise HTTPException(status_code=404, detail="Guitar not found")
@@ -505,7 +418,6 @@ def admin_delete_guitar(
     guitar_id: int,
     admin: dict = Depends(get_admin_user)
 ):
-    """Delete a guitar (Admin only)"""
     guitar = db.get_guitar(guitar_id)
     if not guitar:
         raise HTTPException(status_code=404, detail="Guitar not found")
@@ -516,9 +428,9 @@ def admin_delete_guitar(
     raise HTTPException(status_code=500, detail="Failed to delete guitar")
 
 
-# ==================== RUN SERVER ====================
-
 if __name__ == "__main__":
     import uvicorn
-    
+    print("Starting StringMaster Guitar Shop API v2.0")
+    print("API Docs: http://localhost:8000/docs")
+    print("Default Admin: username=admin, password=admin123")
     uvicorn.run(app, host="0.0.0.0", port=8000)

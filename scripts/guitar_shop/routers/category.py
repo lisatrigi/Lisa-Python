@@ -1,8 +1,3 @@
-"""
-Category Router - StringMaster Guitar Shop
-Handles guitar category management via FastAPI
-"""
-
 from typing import List
 from fastapi import APIRouter, HTTPException, Depends, status
 
@@ -12,26 +7,17 @@ from routers.auth import get_current_user, get_admin_user
 
 router = APIRouter(prefix="/api/categories", tags=["Categories"])
 
-# Database instance
 db = DatabaseManager("guitar_shop.db")
 
 
-# ==================== CATEGORY ROUTES ====================
-
 @router.get("/", response_model=List[dict])
 def list_categories():
-    """
-    List all guitar categories
-    - No authentication required
-    - Returns: Electric, Acoustic, Bass, Classical
-    """
     categories = db.get_all_categories()
     return [cat.to_dict() for cat in categories]
 
 
 @router.get("/{category_id}")
 def get_category(category_id: int):
-    """Get single category by ID"""
     category = db.get_category(category_id)
     
     if not category:
@@ -42,10 +28,6 @@ def get_category(category_id: int):
 
 @router.get("/{category_id}/guitars")
 def get_guitars_by_category(category_id: int):
-    """
-    Get all guitars in a specific category
-    - No authentication required
-    """
     category = db.get_category(category_id)
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
@@ -64,8 +46,6 @@ def create_category(
     category_data: CategoryCreate,
     admin: dict = Depends(get_admin_user)
 ):
-    """Create a new category (Admin only)"""
-    # Check if category with same name exists
     existing = db.get_category_by_name(category_data.name)
     if existing:
         raise HTTPException(status_code=400, detail="Category with this name already exists")
@@ -88,14 +68,12 @@ def update_category(
     description: str = None,
     admin: dict = Depends(get_admin_user)
 ):
-    """Update category details (Admin only)"""
     existing = db.get_category(category_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Category not found")
     
     updates = {}
     if name:
-        # Check if another category has this name
         name_check = db.get_category_by_name(name)
         if name_check and name_check.id != category_id:
             raise HTTPException(status_code=400, detail="Category name already in use")
@@ -115,12 +93,10 @@ def update_category(
 
 @router.delete("/{category_id}")
 def delete_category(category_id: int, admin: dict = Depends(get_admin_user)):
-    """Delete a category (Admin only)"""
     category = db.get_category(category_id)
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
     
-    # Check if category has guitars
     guitars = db.get_guitars_by_category(category_id)
     if guitars:
         raise HTTPException(
@@ -137,11 +113,6 @@ def delete_category(category_id: int, admin: dict = Depends(get_admin_user)):
 
 @router.get("/type/{guitar_type}")
 def get_category_by_type(guitar_type: GuitarType):
-    """
-    Get category by guitar type
-    - Maps guitar type enum to category
-    """
-    # Map guitar types to category names
     type_to_name = {
         GuitarType.ELECTRIC: "Electric",
         GuitarType.ACOUSTIC: "Acoustic",
@@ -169,11 +140,6 @@ def get_category_by_type(guitar_type: GuitarType):
 
 @router.get("/stats/summary")
 def get_category_stats(admin: dict = Depends(get_admin_user)):
-    """
-    Get statistics for all categories (Admin only)
-    - Guitar count per category
-    - Total inventory value per category
-    """
     categories = db.get_all_categories()
     stats = []
     

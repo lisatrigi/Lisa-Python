@@ -1,8 +1,3 @@
-"""
-User Router - StringMaster Guitar Shop
-Handles user management via FastAPI
-"""
-
 from typing import List
 from fastapi import APIRouter, HTTPException, Depends, status
 
@@ -12,30 +7,17 @@ from routers.auth import get_current_user, get_admin_user, AuthManager
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 
-# Database instance
 db = DatabaseManager("guitar_shop.db")
 
 
-# ==================== USER ROUTES ====================
-
 @router.get("/", response_model=List[dict])
 def list_users(admin: dict = Depends(get_admin_user)):
-    """
-    List all users (Admin only)
-    Returns user data without sensitive information
-    """
     users = db.get_all_users()
     return [user.to_dict() for user in users]
 
 
 @router.get("/{user_id}", response_model=dict)
 def get_user(user_id: int, current_user: dict = Depends(get_current_user)):
-    """
-    Get user by ID
-    - Users can only view their own profile
-    - Admins can view any user
-    """
-    # Check authorization
     if current_user['role'] != UserRole.ADMIN.value and current_user['user_id'] != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -55,12 +37,6 @@ def update_user(
     email: str = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Update user profile
-    - Users can only update their own profile
-    - Admins can update any user
-    """
-    # Check authorization
     if current_user['role'] != UserRole.ADMIN.value and current_user['user_id'] != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -92,12 +68,10 @@ def update_user(
 
 @router.delete("/{user_id}")
 def delete_user(user_id: int, admin: dict = Depends(get_admin_user)):
-    """Delete a user (Admin only)"""
     user = db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Prevent deleting own admin account
     if admin['user_id'] == user_id:
         raise HTTPException(status_code=400, detail="Cannot delete your own admin account")
     
@@ -114,12 +88,10 @@ def update_user_role(
     role: UserRole,
     admin: dict = Depends(get_admin_user)
 ):
-    """Update user role (Admin only)"""
     user = db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Prevent demoting own admin account
     if admin['user_id'] == user_id and role != UserRole.ADMIN:
         raise HTTPException(status_code=400, detail="Cannot demote your own admin account")
     
@@ -132,12 +104,6 @@ def update_user_role(
 
 @router.get("/{user_id}/orders")
 def get_user_orders(user_id: int, current_user: dict = Depends(get_current_user)):
-    """
-    Get user's order history
-    - Users can only view their own orders
-    - Admins can view any user's orders
-    """
-    # Check authorization
     if current_user['role'] != UserRole.ADMIN.value and current_user['user_id'] != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

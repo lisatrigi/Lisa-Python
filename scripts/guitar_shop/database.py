@@ -1,8 +1,3 @@
-"""
-Database Management Module - StringMaster Guitar Shop
-SQLite database with CRUD operations using SQLAlchemy patterns
-"""
-
 import sqlite3
 from contextlib import contextmanager
 from typing import Optional, List, Tuple
@@ -12,16 +7,12 @@ from models import Guitar, GuitarType, User, UserRole, OrderStatus, Category
 
 
 class DatabaseManager:
-    """Database manager with connection pooling and CRUD operations"""
-    
     def __init__(self, db_path: str = "guitar_shop.db"):
-        """Initialize database with path"""
         self.db_path = db_path
         self._init_database()
     
     @contextmanager
     def get_connection(self):
-        """Context manager for database connections with error handling"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
@@ -34,11 +25,9 @@ class DatabaseManager:
             conn.close()
     
     def _init_database(self) -> None:
-        """Initialize database tables"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
-            # Categories table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS categories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +36,6 @@ class DatabaseManager:
                 )
             """)
             
-            # Guitars table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS guitars (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,7 +53,6 @@ class DatabaseManager:
                 )
             """)
             
-            # Users table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,7 +66,6 @@ class DatabaseManager:
                 )
             """)
             
-            # Orders table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS orders (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +77,6 @@ class DatabaseManager:
                 )
             """)
             
-            # Order items table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS order_items (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,7 +89,6 @@ class DatabaseManager:
                 )
             """)
             
-            # Purchase notifications table (for admin)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS purchase_notifications (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -119,7 +103,6 @@ class DatabaseManager:
                 )
             """)
             
-            # Initialize default categories
             default_categories = [
                 ("Electric", "Electric guitars with pickups and amplification"),
                 ("Acoustic", "Steel-string acoustic guitars"),
@@ -132,10 +115,7 @@ class DatabaseManager:
                     INSERT OR IGNORE INTO categories (name, description) VALUES (?, ?)
                 """, (name, desc))
     
-    # ==================== CATEGORY CRUD ====================
-    
     def create_category(self, category: Category) -> int:
-        """Create a new category"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -144,7 +124,6 @@ class DatabaseManager:
             return cursor.lastrowid
     
     def get_category(self, category_id: int) -> Optional[Category]:
-        """Get category by ID"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM categories WHERE id = ?", (category_id,))
@@ -154,7 +133,6 @@ class DatabaseManager:
             return None
     
     def get_category_by_name(self, name: str) -> Optional[Category]:
-        """Get category by name"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM categories WHERE LOWER(name) = LOWER(?)", (name,))
@@ -164,7 +142,6 @@ class DatabaseManager:
             return None
     
     def get_all_categories(self) -> List[Category]:
-        """Get all categories"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM categories ORDER BY name")
@@ -172,7 +149,6 @@ class DatabaseManager:
                     for row in cursor.fetchall()]
     
     def update_category(self, category_id: int, **kwargs) -> bool:
-        """Update category fields"""
         if not kwargs:
             return False
         
@@ -191,24 +167,18 @@ class DatabaseManager:
             return cursor.rowcount > 0
     
     def delete_category(self, category_id: int) -> bool:
-        """Delete a category"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM categories WHERE id = ?", (category_id,))
             return cursor.rowcount > 0
     
     def get_guitars_by_category(self, category_id: int) -> List[Guitar]:
-        """Get all guitars in a category"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM guitars WHERE category_id = ?", (category_id,))
             return [self._row_to_guitar(row) for row in cursor.fetchall()]
     
-    # ==================== GUITAR CRUD ====================
-    
     def create_guitar(self, guitar: Guitar) -> int:
-        """Insert a new guitar into database"""
-        # Auto-assign category based on guitar type
         category_id = guitar.category_id
         if not category_id:
             category = self.get_category_by_name(guitar.guitar_type.value.capitalize())
@@ -233,7 +203,6 @@ class DatabaseManager:
             return cursor.lastrowid
     
     def get_guitar(self, guitar_id: int) -> Optional[Guitar]:
-        """Get guitar by ID"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM guitars WHERE id = ?", (guitar_id,))
@@ -251,11 +220,9 @@ class DatabaseManager:
         in_stock_only: bool = False,
         category_id: Optional[int] = None
     ) -> List[Guitar]:
-        """Get all guitars with optional filters"""
         query = "SELECT * FROM guitars WHERE 1=1"
         params = []
         
-        # Apply filters using conditional statements
         if guitar_type:
             query += " AND guitar_type = ?"
             params.append(guitar_type.value)
@@ -287,7 +254,6 @@ class DatabaseManager:
             return [self._row_to_guitar(row) for row in cursor.fetchall()]
     
     def update_guitar(self, guitar_id: int, **kwargs) -> bool:
-        """Update guitar fields dynamically"""
         if not kwargs:
             return False
         
@@ -297,7 +263,6 @@ class DatabaseManager:
         if not updates:
             return False
         
-        # Handle guitar_type enum
         if 'guitar_type' in updates and isinstance(updates['guitar_type'], GuitarType):
             updates['guitar_type'] = updates['guitar_type'].value
         
@@ -310,14 +275,12 @@ class DatabaseManager:
             return cursor.rowcount > 0
     
     def delete_guitar(self, guitar_id: int) -> bool:
-        """Delete a guitar from database"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM guitars WHERE id = ?", (guitar_id,))
             return cursor.rowcount > 0
     
     def update_stock(self, guitar_id: int, quantity_change: int) -> bool:
-        """Update guitar stock (positive = add, negative = subtract)"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -327,7 +290,6 @@ class DatabaseManager:
             return cursor.rowcount > 0
     
     def guitar_exists(self, name: str, brand: str) -> bool:
-        """Check if guitar already exists"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -337,20 +299,17 @@ class DatabaseManager:
             return cursor.fetchone() is not None
     
     def get_guitar_count(self) -> int:
-        """Get total number of guitars"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM guitars")
             return cursor.fetchone()[0]
     
     def apply_discount_to_guitar(self, guitar_id: int, discount_percent: float) -> bool:
-        """Apply discount to a specific guitar"""
         if not 0 <= discount_percent <= 100:
             raise ValueError("Discount must be between 0 and 100")
         return self.update_guitar(guitar_id, discount_percent=discount_percent)
     
     def apply_discount_to_brand(self, brand: str, discount_percent: float) -> int:
-        """Apply discount to all guitars of a brand, returns count of updated guitars"""
         if not 0 <= discount_percent <= 100:
             raise ValueError("Discount must be between 0 and 100")
         
@@ -362,7 +321,6 @@ class DatabaseManager:
             return cursor.rowcount
     
     def apply_discount_to_type(self, guitar_type: str, discount_percent: float) -> int:
-        """Apply discount to all guitars of a type, returns count of updated guitars"""
         if not 0 <= discount_percent <= 100:
             raise ValueError("Discount must be between 0 and 100")
         
@@ -374,23 +332,18 @@ class DatabaseManager:
             return cursor.rowcount
     
     def clear_all_discounts(self) -> int:
-        """Clear all discounts, returns count of updated guitars"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("UPDATE guitars SET discount_percent = 0 WHERE discount_percent > 0")
             return cursor.rowcount
     
     def get_discounted_guitars(self) -> List[Guitar]:
-        """Get all guitars with active discounts"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM guitars WHERE discount_percent > 0 ORDER BY discount_percent DESC")
             return [self._row_to_guitar(row) for row in cursor.fetchall()]
     
-    # ==================== USER CRUD ====================
-    
     def create_user(self, user: User) -> int:
-        """Create a new user"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             try:
@@ -407,7 +360,6 @@ class DatabaseManager:
                 raise
     
     def get_user_by_username(self, username: str) -> Optional[User]:
-        """Get user by username"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
@@ -417,7 +369,6 @@ class DatabaseManager:
             return None
     
     def get_user_by_id(self, user_id: int) -> Optional[User]:
-        """Get user by ID"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
@@ -427,7 +378,6 @@ class DatabaseManager:
             return None
     
     def get_user_by_email(self, email: str) -> Optional[User]:
-        """Get user by email"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
@@ -437,21 +387,18 @@ class DatabaseManager:
             return None
     
     def get_all_users(self) -> List[User]:
-        """Get all users"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
             return [self._row_to_user(row) for row in cursor.fetchall()]
     
     def get_online_users(self) -> List[User]:
-        """Get all currently online users (non-admin)"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM users WHERE is_online = 1 AND role != 'admin' ORDER BY last_login DESC")
             return [self._row_to_user(row) for row in cursor.fetchall()]
     
     def set_user_online(self, user_id: int, is_online: bool) -> bool:
-        """Set user online status"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             if is_online:
@@ -465,7 +412,6 @@ class DatabaseManager:
             return cursor.rowcount > 0
     
     def update_user(self, user_id: int, **kwargs) -> bool:
-        """Update user fields"""
         if not kwargs:
             return False
         
@@ -484,16 +430,12 @@ class DatabaseManager:
             return cursor.rowcount > 0
     
     def delete_user(self, user_id: int) -> bool:
-        """Delete a user"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
             return cursor.rowcount > 0
     
-    # ==================== NOTIFICATION OPERATIONS ====================
-    
     def create_purchase_notification(self, order_id: int, user_id: int, username: str, total: float) -> int:
-        """Create a purchase notification for admin"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -503,7 +445,6 @@ class DatabaseManager:
             return cursor.lastrowid
     
     def get_unread_notifications(self) -> List[dict]:
-        """Get all unread purchase notifications"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -516,7 +457,6 @@ class DatabaseManager:
             return [dict(row) for row in cursor.fetchall()]
     
     def get_all_notifications(self, limit: int = 50) -> List[dict]:
-        """Get all purchase notifications"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -529,20 +469,16 @@ class DatabaseManager:
             return [dict(row) for row in cursor.fetchall()]
     
     def mark_notification_read(self, notification_id: int) -> bool:
-        """Mark a notification as read"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("UPDATE purchase_notifications SET is_read = 1 WHERE id = ?", (notification_id,))
             return cursor.rowcount > 0
     
     def mark_all_notifications_read(self) -> int:
-        """Mark all notifications as read"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("UPDATE purchase_notifications SET is_read = 1 WHERE is_read = 0")
             return cursor.rowcount
-    
-    # ==================== ORDER OPERATIONS ====================
     
     def create_order(
         self, 
@@ -550,7 +486,6 @@ class DatabaseManager:
         items: List[Tuple[int, int, float]], 
         total: float
     ) -> int:
-        """Create order with items: [(guitar_id, quantity, price_at_purchase), ...]"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -567,7 +502,6 @@ class DatabaseManager:
             return order_id
     
     def get_user_orders(self, user_id: int) -> List[dict]:
-        """Get all orders for a user"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -600,7 +534,6 @@ class DatabaseManager:
             return list(orders.values())
     
     def get_all_orders(self, limit: int = 100) -> List[dict]:
-        """Get all orders (for admin)"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -636,7 +569,6 @@ class DatabaseManager:
             return list(orders.values())
     
     def update_order_status(self, order_id: int, status: OrderStatus) -> bool:
-        """Update order status"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -645,10 +577,7 @@ class DatabaseManager:
             )
             return cursor.rowcount > 0
     
-    # ==================== ANALYTICS ====================
-    
     def get_sales_data(self) -> List[dict]:
-        """Get sales data for analytics"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -664,7 +593,6 @@ class DatabaseManager:
             return [dict(row) for row in cursor.fetchall()]
     
     def get_inventory_stats(self) -> dict:
-        """Get inventory statistics"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
@@ -690,14 +618,12 @@ class DatabaseManager:
             """)
             stats['by_brand'] = {row['brand']: row['count'] for row in cursor.fetchall()}
             
-            # Count guitars per brand (unique models)
             cursor.execute("""
                 SELECT brand, COUNT(*) as model_count
                 FROM guitars GROUP BY brand ORDER BY model_count DESC
             """)
             stats['models_by_brand'] = {row['brand']: row['model_count'] for row in cursor.fetchall()}
             
-            # Sales statistics
             cursor.execute("""
                 SELECT COUNT(*) as total_orders, 
                        COALESCE(SUM(total), 0) as total_revenue
@@ -707,14 +633,12 @@ class DatabaseManager:
             stats['total_orders'] = sales_stats['total_orders']
             stats['total_revenue'] = sales_stats['total_revenue']
             
-            # Get active discounts count
             cursor.execute("SELECT COUNT(*) as discounted FROM guitars WHERE discount_percent > 0")
             stats['discounted_count'] = cursor.fetchone()['discounted']
             
             return stats
     
     def get_brand_statistics(self) -> List[dict]:
-        """Get detailed statistics by brand"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -733,7 +657,6 @@ class DatabaseManager:
             return [dict(row) for row in cursor.fetchall()]
     
     def get_type_statistics(self) -> List[dict]:
-        """Get detailed statistics by guitar type"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -751,10 +674,7 @@ class DatabaseManager:
             """)
             return [dict(row) for row in cursor.fetchall()]
     
-    # ==================== HELPER METHODS ====================
-    
     def _row_to_guitar(self, row) -> Guitar:
-        """Convert database row to Guitar object"""
         created_at = row['created_at']
         if isinstance(created_at, str):
             try:
@@ -774,7 +694,6 @@ class DatabaseManager:
             category_id=row['category_id'] if 'category_id' in row.keys() else None,
             created_at=created_at
         )
-        # Add discount_percent attribute
         if 'discount_percent' in row.keys():
             guitar.discount_percent = row['discount_percent'] or 0
         else:
@@ -782,7 +701,6 @@ class DatabaseManager:
         return guitar
     
     def _row_to_user(self, row) -> User:
-        """Convert database row to User object"""
         created_at = row['created_at']
         if isinstance(created_at, str):
             try:
@@ -798,7 +716,6 @@ class DatabaseManager:
             role=UserRole(row['role']),
             created_at=created_at
         )
-        # Add online status attributes
         if 'is_online' in row.keys():
             user.is_online = bool(row['is_online'])
         else:

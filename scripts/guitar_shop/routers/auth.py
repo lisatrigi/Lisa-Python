@@ -1,15 +1,9 @@
-"""
-Authentication Router - StringMaster Guitar Shop
-Handles user registration and login via FastAPI
-"""
-
 import hashlib
 import secrets
 import json
 import base64
 from datetime import datetime, timedelta
 from typing import Optional
-from functools import wraps
 
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -21,24 +15,18 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 security = HTTPBearer()
 
 
-# ==================== AUTH MANAGER ====================
-
 class AuthManager:
-    """Handles user authentication and authorization with secure practices"""
-    
     SECRET_KEY = secrets.token_hex(32)
     TOKEN_EXPIRY_HOURS = 24
     
     @staticmethod
     def hash_password(password: str) -> str:
-        """Hash password with salt using SHA-256"""
         salt = secrets.token_hex(16)
         password_hash = hashlib.sha256((password + salt).encode()).hexdigest()
         return f"{salt}${password_hash}"
     
     @staticmethod
     def verify_password(password: str, stored_hash: str) -> bool:
-        """Verify password against stored hash"""
         try:
             salt, hash_value = stored_hash.split('$')
             computed_hash = hashlib.sha256((password + salt).encode()).hexdigest()
@@ -48,7 +36,6 @@ class AuthManager:
     
     @classmethod
     def generate_token(cls, user: User) -> str:
-        """Generate a JWT-like token for authentication"""
         header = {"alg": "HS256", "typ": "JWT"}
         payload = {
             "user_id": user.id,
@@ -67,7 +54,6 @@ class AuthManager:
     
     @classmethod
     def verify_token(cls, token: str) -> Optional[dict]:
-        """Verify and decode token, returns payload if valid"""
         try:
             parts = token.split('.')
             if len(parts) != 3:
@@ -95,7 +81,6 @@ class AuthManager:
     
     @staticmethod
     def validate_password_strength(password: str) -> tuple:
-        """Validate password meets security requirements"""
         errors = []
         
         if len(password) < 6:
@@ -117,7 +102,6 @@ class AuthManager:
     
     @staticmethod
     def validate_email(email: str) -> bool:
-        """Basic email validation"""
         if not email or '@' not in email:
             return False
         parts = email.split('@')
@@ -129,14 +113,10 @@ class AuthManager:
         return True
 
 
-# Database instance
 db = DatabaseManager("guitar_shop.db")
 
 
-# ==================== DEPENDENCIES ====================
-
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    """Dependency to get current authenticated user from token"""
     token = credentials.credentials
     payload = AuthManager.verify_token(token)
     
@@ -150,7 +130,6 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 
 def get_admin_user(current_user: dict = Depends(get_current_user)) -> dict:
-    """Dependency to verify admin role"""
     if current_user['role'] != UserRole.ADMIN.value:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -160,7 +139,6 @@ def get_admin_user(current_user: dict = Depends(get_current_user)) -> dict:
 
 
 def get_customer_user(current_user: dict = Depends(get_current_user)) -> dict:
-    """Dependency to verify customer role (non-admin)"""
     if current_user['role'] == UserRole.ADMIN.value:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -169,34 +147,21 @@ def get_customer_user(current_user: dict = Depends(get_current_user)) -> dict:
     return current_user
 
 
-# ==================== AUTH ROUTES ====================
-
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register_user(user_data: UserCreate):
-    """
-    Register a new user account
-    - Validates password strength
-    - Validates email format
-    - Creates customer account
-    """
-    # Validate password
     valid, message = AuthManager.validate_password_strength(user_data.password)
     if not valid:
         raise HTTPException(status_code=400, detail=message)
     
-    # Validate email
     if not AuthManager.validate_email(user_data.email):
         raise HTTPException(status_code=400, detail="Invalid email format")
     
-    # Check if username exists
     if db.get_user_by_username(user_data.username):
         raise HTTPException(status_code=400, detail="Username already exists")
     
-    # Check if email exists
     if db.get_user_by_email(user_data.email):
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    # Create user
     user = User(
         username=user_data.username,
         email=user_data.email,
@@ -214,7 +179,6 @@ def register_user(user_data: UserCreate):
 
 @router.post("/login", response_model=TokenResponse)
 def login_user(credentials: UserLogin):
-    """Authenticate user and return JWT token"""
     user = db.get_user_by_username(credentials.username)
     
     if not user:
@@ -229,7 +193,6 @@ def login_user(credentials: UserLogin):
             detail="Invalid username or password"
         )
     
-    # Set user as online
     db.set_user_online(user.id, True)
     
     token = AuthManager.generate_token(user)
@@ -243,7 +206,6 @@ def login_user(credentials: UserLogin):
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user_profile(current_user: dict = Depends(get_current_user)):
-    """Get current user's profile"""
     user = db.get_user_by_id(current_user['user_id'])
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -252,10 +214,8 @@ def get_current_user_profile(current_user: dict = Depends(get_current_user)):
 
 @router.post("/logout")
 def logout_user(current_user: dict = Depends(get_current_user)):
-    """Logout user (set offline status and client should discard token)"""
     db.set_user_online(current_user['user_id'], False)
     return {"message": "Successfully logged out"}
 
 
-# Export AuthManager for use in other modules
 __all__ = ['router', 'AuthManager', 'get_current_user', 'get_admin_user', 'get_customer_user']

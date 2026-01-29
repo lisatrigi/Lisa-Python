@@ -1,18 +1,8 @@
-"""
-StringMaster Guitar Shop - Streamlit Frontend
-Displays and interacts with the FastAPI backend
-All business logic is handled by FastAPI - Streamlit only handles UI
-"""
-
 import streamlit as st
 import requests
 from typing import Optional
 
-# ==================== CONFIGURATION ====================
-
 API_BASE_URL = "http://localhost:8000/api"
-
-# ==================== PAGE CONFIG ====================
 
 st.set_page_config(
     page_title="StringMaster Guitar Shop",
@@ -20,8 +10,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# ==================== CUSTOM CSS ====================
 
 st.markdown("""
 <style>
@@ -32,7 +20,6 @@ st.markdown("""
         text-align: center;
         margin-bottom: 2rem;
     }
-    
     .guitar-card {
         background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
         padding: 20px;
@@ -40,29 +27,24 @@ st.markdown("""
         margin: 10px 0;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
-    
     .price-tag {
         font-size: 1.5rem;
         color: #2d6a4f;
         font-weight: bold;
     }
-    
     .discount-price {
         font-size: 1.5rem;
         color: #e63946;
         font-weight: bold;
     }
-    
     .original-price {
         font-size: 1rem;
         color: #888;
         text-decoration: line-through;
     }
-    
     .stock-good { color: #2d6a4f; }
     .stock-low { color: #e76f51; }
     .stock-out { color: #9d0208; }
-    
     .notification-badge {
         background-color: #e63946;
         color: white;
@@ -71,7 +53,6 @@ st.markdown("""
         font-size: 0.8rem;
         margin-left: 5px;
     }
-    
     .online-indicator {
         display: inline-block;
         width: 10px;
@@ -80,13 +61,10 @@ st.markdown("""
         border-radius: 50%;
         margin-right: 5px;
     }
-    
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
-
-# ==================== SESSION STATE ====================
 
 if "token" not in st.session_state:
     st.session_state.token = None
@@ -100,10 +78,7 @@ if "selected_category" not in st.session_state:
     st.session_state.selected_category = None
 
 
-# ==================== API HELPER FUNCTIONS ====================
-
 def api_request(method: str, endpoint: str, data: dict = None, auth: bool = False) -> Optional[dict]:
-    """Make API request to FastAPI backend"""
     url = f"{API_BASE_URL}{endpoint}"
     headers = {}
     
@@ -137,8 +112,6 @@ def api_request(method: str, endpoint: str, data: dict = None, auth: bool = Fals
 
 
 def logout():
-    """Clear session and logout"""
-    # Call logout endpoint to set user offline
     api_request("POST", "/auth/logout", auth=True)
     st.session_state.token = None
     st.session_state.user = None
@@ -148,7 +121,6 @@ def logout():
 
 
 def get_cart_summary():
-    """Calculate cart totals from local cart"""
     cart = st.session_state.cart
     total_items = sum(item["quantity"] for item in cart.values())
     total_price = sum(item.get("effective_price", item["guitar"]["price"]) * item["quantity"] for item in cart.values())
@@ -156,15 +128,10 @@ def get_cart_summary():
 
 
 def is_admin():
-    """Check if current user is admin"""
     return st.session_state.user and st.session_state.user.get('role') == 'admin'
 
 
-# ==================== LOGIN PAGE ====================
-
 def show_login_page():
-    """Display login/register page - REQUIRED before shopping"""
-    
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
@@ -186,7 +153,6 @@ def show_login_page():
                     if not username or not password:
                         st.error("Please enter username and password")
                     else:
-                        # Call FastAPI login endpoint
                         result = api_request("POST", "/auth/login", {
                             "username": username,
                             "password": password
@@ -195,7 +161,6 @@ def show_login_page():
                         if result:
                             st.session_state.token = result["access_token"]
                             st.session_state.user = result["user"]
-                            # Admins go to admin dashboard, customers go to catalog
                             if result["user"].get("role") == "admin":
                                 st.session_state.page = "admin"
                             else:
@@ -204,7 +169,7 @@ def show_login_page():
                             st.rerun()
             
             st.markdown("---")
-            st.info("Demo accounts: **admin/Admin123** (Admin) or register a new account (Customer)")
+            st.info("Demo accounts: **admin/admin123** (Admin) or register a new account (Customer)")
         
         with tab_register:
             st.subheader("Create Account")
@@ -230,7 +195,6 @@ def show_login_page():
                         for error in errors:
                             st.error(error)
                     else:
-                        # Call FastAPI register endpoint
                         result = api_request("POST", "/auth/register", {
                             "username": reg_username,
                             "email": reg_email,
@@ -244,23 +208,16 @@ def show_login_page():
             st.caption("Password requirements: 6+ characters, uppercase, lowercase, and digit")
 
 
-# ==================== CATALOG PAGE ====================
-
 def show_catalog():
-    """Display guitar catalog with filters - fetches from FastAPI"""
-    
     st.markdown("<h1 class='main-header'>Guitar Catalog</h1>", unsafe_allow_html=True)
     
-    # Check if we should filter by category
     selected_type = "All Types"
     if st.session_state.selected_category:
         selected_type = st.session_state.selected_category
     
-    # Sidebar filters
     with st.sidebar:
         st.header("Filters")
         
-        # Price range
         price_range = st.slider(
             "Price Range ($)",
             min_value=0,
@@ -269,31 +226,26 @@ def show_catalog():
             step=100
         )
         
-        # Guitar type - fetch categories from API
         categories = api_request("GET", "/categories")
         type_options = ["All Types"]
         if categories:
             type_options += [cat["name"] for cat in categories]
         
-        # Use selected category if set, otherwise use dropdown
         selected_type = st.selectbox(
             "Guitar Type", 
             type_options,
             index=type_options.index(st.session_state.selected_category) if st.session_state.selected_category in type_options else 0
         )
         
-        # Clear category filter button
         if st.session_state.selected_category:
             if st.button("Clear Category Filter"):
                 st.session_state.selected_category = None
                 st.rerun()
         
-        # In stock only
         in_stock_only = st.checkbox("In Stock Only", value=True)
         
         st.markdown("---")
         
-        # Cart summary in sidebar (only for customers)
         if not is_admin():
             total_items, total_price = get_cart_summary()
             if total_items > 0:
@@ -304,7 +256,6 @@ def show_catalog():
                     st.session_state.page = "cart"
                     st.rerun()
     
-    # Build query parameters for API
     params = {
         "min_price": price_range[0],
         "max_price": price_range[1],
@@ -317,14 +268,12 @@ def show_catalog():
     else:
         st.session_state.selected_category = None
     
-    # Fetch guitars from FastAPI
     guitars = api_request("GET", "/guitars", params)
     
     if guitars is None:
         st.warning("Unable to load guitars. Please check if the API is running.")
         return
     
-    # Show current filter
     if selected_type != "All Types":
         st.info(f"Showing {selected_type} guitars only")
     
@@ -334,7 +283,6 @@ def show_catalog():
         st.info("No guitars match your filters. Try adjusting the criteria.")
         return
     
-    # Display guitars in grid
     cols = st.columns(3)
     
     for idx, guitar in enumerate(guitars):
@@ -349,7 +297,6 @@ def show_catalog():
                 st.caption(f"Type: {guitar['guitar_type'].capitalize()}")
                 st.markdown(f"_{guitar.get('description', '')}_")
                 
-                # Show price with discount if applicable
                 discount = guitar.get('discount_percent', 0)
                 if discount > 0:
                     original_price = guitar.get('original_price', guitar['price'])
@@ -369,7 +316,6 @@ def show_catalog():
                 else:
                     st.error("Out of Stock")
                 
-                # Add to cart button (only for customers, not admins)
                 if not is_admin():
                     if stock > 0:
                         if st.button(f"Add to Cart", key=f"add_{guitar['id']}", use_container_width=True):
@@ -395,12 +341,7 @@ def show_catalog():
                 st.markdown("---")
 
 
-# ==================== CART PAGE ====================
-
 def show_cart():
-    """Display shopping cart and checkout (Customers only)"""
-    
-    # Admin cannot access cart
     if is_admin():
         st.error("Administrators cannot purchase guitars. Please use a customer account.")
         if st.button("Go to Admin Dashboard"):
@@ -419,7 +360,6 @@ def show_cart():
             st.rerun()
         return
     
-    # Display cart items
     for guitar_id, item in list(cart.items()):
         guitar = item["guitar"]
         quantity = item["quantity"]
@@ -462,7 +402,6 @@ def show_cart():
         
         st.markdown("---")
     
-    # Cart summary
     st.markdown("### Order Summary")
     
     total_items, total_price = get_cart_summary()
@@ -482,14 +421,12 @@ def show_cart():
         st.markdown(f"## ${total_price:,.2f}")
         
         if st.button("Checkout / Purchase", type="primary", use_container_width=True):
-            # First add items to API cart, then purchase
             for guitar_id, item in cart.items():
                 api_request("POST", "/guitars/cart/add", {
                     "guitar_id": int(guitar_id),
                     "quantity": item["quantity"]
                 }, auth=True)
             
-            # Call purchase endpoint
             result = api_request("POST", "/guitars/purchase", auth=True)
             
             if result:
@@ -502,11 +439,7 @@ def show_cart():
             st.rerun()
 
 
-# ==================== CATEGORIES PAGE ====================
-
 def show_categories():
-    """Display guitar categories - fetches from FastAPI"""
-    
     st.markdown("<h1 class='main-header'>Guitar Categories</h1>", unsafe_allow_html=True)
     
     categories = api_request("GET", "/categories")
@@ -534,12 +467,10 @@ def show_categories():
                 st.markdown(f"### {category['name']} Guitars")
                 st.markdown(f"_{category.get('description', '')}_")
                 
-                # Get guitar count for this category
                 cat_guitars = api_request("GET", f"/categories/{category['id']}/guitars")
                 if cat_guitars:
                     st.caption(f"{cat_guitars.get('count', 0)} guitars available")
                 
-                # Browse button - sets category filter and goes to catalog
                 if st.button(f"Browse {category['name']}", key=f"cat_{category['id']}", use_container_width=True):
                     st.session_state.selected_category = category['name']
                     st.session_state.page = "catalog"
@@ -548,11 +479,7 @@ def show_categories():
                 st.markdown("---")
 
 
-# ==================== PROFILE PAGE ====================
-
 def show_profile():
-    """Display user profile and order history"""
-    
     st.markdown("<h1 class='main-header'>My Profile</h1>", unsafe_allow_html=True)
     
     user = st.session_state.user
@@ -578,7 +505,6 @@ def show_profile():
     
     st.markdown("---")
     
-    # Order history from API (not for admins)
     if not is_admin():
         st.subheader("Order History")
         
@@ -601,27 +527,20 @@ def show_profile():
         st.rerun()
 
 
-# ==================== ADMIN DASHBOARD ====================
-
 def show_admin_dashboard():
-    """Display admin dashboard with full management capabilities"""
-    
     st.markdown("<h1 class='main-header'>Admin Dashboard</h1>", unsafe_allow_html=True)
     
     if not is_admin():
         st.error("Access denied. Admin privileges required.")
         return
     
-    # Create tabs for different admin sections
     tab_overview, tab_users, tab_inventory, tab_orders, tab_discounts, tab_add_guitar = st.tabs([
         "Overview", "Online Users", "Inventory & Stats", "Orders & Notifications", "Discounts", "Add Guitar"
     ])
     
-    # ==================== OVERVIEW TAB ====================
     with tab_overview:
         st.subheader("Shop Overview")
         
-        # Get stats from API
         stats = api_request("GET", "/stats")
         
         if stats:
@@ -637,12 +556,10 @@ def show_admin_dashboard():
             col3.metric("Brands", len(stats.get("by_brand", {})))
             col4.metric("Active Discounts", stats.get("discounted_count", 0))
         
-        # Check for unread notifications
         notifications = api_request("GET", "/admin/notifications", {"unread_only": True}, auth=True)
         if notifications and notifications.get("count", 0) > 0:
             st.warning(f"You have {notifications['count']} unread purchase notifications!")
     
-    # ==================== ONLINE USERS TAB ====================
     with tab_users:
         st.subheader("Currently Online Users")
         
@@ -677,11 +594,9 @@ def show_admin_dashboard():
                 if user['role'] != 'admin':
                     st.markdown(f"- **{user['username']}** ({user['email']}) - {user['role']}")
     
-    # ==================== INVENTORY & STATS TAB ====================
     with tab_inventory:
         st.subheader("Inventory Statistics")
         
-        # Get detailed brand statistics
         brand_stats = api_request("GET", "/admin/brand-statistics", auth=True)
         type_stats = api_request("GET", "/admin/type-statistics", auth=True)
         
@@ -711,7 +626,6 @@ def show_admin_dashboard():
             
             df = pd.DataFrame(brand_stats["brands"])
             
-            # Bar chart for models by brand
             st.bar_chart(df.set_index('brand')['model_count'])
             
             st.markdown("#### Stock by Brand")
@@ -720,7 +634,6 @@ def show_admin_dashboard():
             st.markdown("#### Inventory Value by Brand")
             st.bar_chart(df.set_index('brand')['inventory_value'])
     
-    # ==================== ORDERS & NOTIFICATIONS TAB ====================
     with tab_orders:
         st.subheader("Purchase Notifications")
         
@@ -739,7 +652,6 @@ def show_admin_dashboard():
         if notifications and notifications.get("notifications"):
             for notif in notifications["notifications"]:
                 is_unread = not notif.get("is_read", True)
-                icon = "NEW" if is_unread else ""
                 
                 with st.expander(f"{'[NEW] ' if is_unread else ''}Order #{notif['order_id']} - {notif['username']} - ${notif['total']:,.2f}"):
                     st.markdown(f"**Customer:** {notif['username']}")
@@ -770,7 +682,6 @@ def show_admin_dashboard():
         else:
             st.info("No orders yet.")
     
-    # ==================== DISCOUNTS TAB ====================
     with tab_discounts:
         st.subheader("Discount Management")
         
@@ -829,7 +740,6 @@ def show_admin_dashboard():
                     st.success(result.get("message", "Discounts cleared!"))
                     st.rerun()
     
-    # ==================== ADD GUITAR TAB ====================
     with tab_add_guitar:
         st.subheader("Add New Guitar to Inventory")
         
@@ -868,11 +778,7 @@ def show_admin_dashboard():
                         st.json(result.get("guitar", {}))
 
 
-# ==================== NAVIGATION ====================
-
 def show_navigation():
-    """Display navigation sidebar"""
-    
     with st.sidebar:
         st.markdown("## StringMaster")
         st.markdown("---")
@@ -890,7 +796,6 @@ def show_navigation():
                 st.session_state.page = "categories"
                 st.rerun()
             
-            # Cart and profile only for customers
             if not is_admin():
                 if st.button("My Cart", use_container_width=True):
                     st.session_state.page = "cart"
@@ -900,12 +805,10 @@ def show_navigation():
                     st.session_state.page = "profile"
                     st.rerun()
             
-            # Admin dashboard for admins
             if is_admin():
                 st.markdown("---")
                 st.markdown("### Admin")
                 
-                # Check for unread notifications
                 notifications = api_request("GET", "/admin/notifications", {"unread_only": True}, auth=True)
                 notif_count = notifications.get("count", 0) if notifications else 0
                 
@@ -924,20 +827,13 @@ def show_navigation():
                 st.rerun()
 
 
-# ==================== MAIN APP ====================
-
 def main():
-    """Main application entry point"""
-    
-    # Show login if not authenticated
     if not st.session_state.token:
         show_login_page()
         return
     
-    # Show navigation
     show_navigation()
     
-    # Route to correct page
     page = st.session_state.page
     
     if page == "catalog":
