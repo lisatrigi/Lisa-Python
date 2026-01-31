@@ -22,7 +22,13 @@ An online guitar shop application built with **FastAPI** (backend) and **Streaml
 
 **Navigate to the project folder:**
    terminal: 
-   cd scripts/guitar_shop
+   cd scripts/guitar_shop OR cd Lisa-Python-main/scripts/guitar_shop
+   pip install -r requirements.txt 
+   
+
+   pip install python-dotenv
+
+
    uvicorn main:app --reload --port 8000
    The backend will be available at `http://localhost:8000`
 

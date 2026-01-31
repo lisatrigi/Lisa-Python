@@ -167,15 +167,15 @@ async def lifespan(app: FastAPI):
     result = scraper.populate_database(db)
     print(f"Database initialization: {result['message']}")
     
-    if not db.get_user_by_username("Admin"):
-        admin = User(
-            username="Admin",
-            email="admin@stringmaster.com",
-            password_hash=AuthManager.hash_password("Admin123"),
-            role=UserRole.ADMIN
-        )
-        db.create_user(admin)
-        print("Created admin user (username: Admin, password: Admin123)")
+    # if not db.get_user_by_username("Admin"):
+    #     admin = User(
+    #         username="Admin",
+    #         email="admin@stringmaster.com",
+    #         password_hash=AuthManager.hash_password("Admin123"),
+    #         role=UserRole.ADMIN
+    #     )
+    #     db.create_user(admin)
+    #     print("Created admin user (username: Admin, password: Admin123)")
     
     yield
     print("Shutting down StringMaster Guitar Shop API...")
