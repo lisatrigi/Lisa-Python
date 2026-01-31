@@ -3,12 +3,16 @@ import os
 import random
 from contextlib import asynccontextmanager
 from typing import Optional, List
+from dotenv import load_dotenv
 
-from fastapi import FastAPI, HTTPException, status, Depends, Query, Body
+from fastapi import FastAPI, HTTPException, status, Depends, Query, Body, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+load_dotenv()
+
+API_KEY = os.getenv("API_KEY", "stringmaster_api_key_2024")
 
 from database import DatabaseManager
 from models import User, UserRole, GuitarType, Guitar, GuitarCreate
@@ -163,15 +167,15 @@ async def lifespan(app: FastAPI):
     result = scraper.populate_database(db)
     print(f"Database initialization: {result['message']}")
     
-    if not db.get_user_by_username("admin"):
+    if not db.get_user_by_username("Admin"):
         admin = User(
-            username="admin",
+            username="Admin",
             email="admin@stringmaster.com",
-            password_hash=AuthManager.hash_password("admin123"),
+            password_hash=AuthManager.hash_password("Admin123"),
             role=UserRole.ADMIN
         )
         db.create_user(admin)
-        print("Created admin user (username: admin, password: admin123)")
+        print("Created admin user (username: Admin, password: Admin123)")
     
     yield
     print("Shutting down StringMaster Guitar Shop API...")
@@ -198,13 +202,20 @@ app.include_router(guitar_router)
 app.include_router(category_router)
 
 
+def verify_api_key(x_api_key: Optional[str] = Header(None)):
+    if x_api_key and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+    return x_api_key
+
+
 @app.get("/")
 def root():
     return {
         "name": "StringMaster Guitar Shop API",
         "version": "2.0.0",
         "status": "running",
-        "docs": "/docs"
+        "docs": "/docs",
+        "api_key_required": True
     }
 
 
@@ -432,5 +443,5 @@ if __name__ == "__main__":
     import uvicorn
     print("Starting StringMaster Guitar Shop API v2.0")
     print("API Docs: http://localhost:8000/docs")
-    print("Default Admin: username=admin, password=admin123")
+    print("Default Admin: username=Admin, password=Admin123")
     uvicorn.run(app, host="0.0.0.0", port=8000)

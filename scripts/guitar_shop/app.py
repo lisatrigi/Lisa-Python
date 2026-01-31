@@ -169,7 +169,7 @@ def show_login_page():
                             st.rerun()
             
             st.markdown("---")
-            st.info("Demo accounts: **admin/admin123** (Admin) or register a new account (Customer)")
+            st.info("Demo accounts: **Admin/Admin123** (Admin) or register a new account (Customer)")
         
         with tab_register:
             st.subheader("Create Account")

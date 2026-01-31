@@ -32,8 +32,8 @@ An online guitar shop application built with **FastAPI** (backend) and **Streaml
 ### Admin Account
 | Field    | Value              |
 |----------|--------------------|
-| Username | `admin`            |
-| Password | `admin123`         |
+| Username | `Admin`            |
+| Password | `Admin123`         |
 
 ### Creating New Accounts
 - **Customers**: Use the "Register" form on the login page
@@ -60,7 +60,7 @@ An online guitar shop application built with **FastAPI** (backend) and **Streaml
 
 ### Accessing the Admin Dashboard
 
-1. Login with admin credentials (`admin` / `admin123`)
+1. Login with admin credentials (`Admin` / `Admin123`)
 2. You will be automatically redirected to the Admin Dashboard
 
 ### Admin Dashboard Sections

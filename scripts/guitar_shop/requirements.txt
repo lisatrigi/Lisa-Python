@@ -3,9 +3,9 @@ uvicorn
 pydantic
 requests
 beautifulsoup4
-sqlite3
 streamlit
 matplotlib
 pandas
 python-multipart
 httpx
+python-dotenv
